@@ -120,3 +120,54 @@ test('supports all permitted booking status transitions', () => {
     )
   }
 })
+test('accepts a valid future time range', () => {
+  const start = new Date(Date.now() + 2 * 60 * 60 * 1000)
+  const end = new Date(start.getTime() + 60 * 60 * 1000)
+
+  const result = validateTimeRange(
+    start.toISOString(),
+    end.toISOString(),
+  )
+
+  assert.deepEqual(result, { valid: true })
+})
+
+test('rejects an invalid end timestamp', () => {
+  const start = new Date(Date.now() + 60 * 60 * 1000)
+
+  const result = validateTimeRange(
+    start.toISOString(),
+    'not-a-date',
+  )
+
+  assert.equal(result.valid, false)
+  assert.equal(result.error, 'INVALID_TIME_FORMAT')
+})
+
+test('allows bookings that end exactly when another begins', () => {
+  assert.equal(
+    hasTimeConflict(10, 12, 12, 14),
+    false,
+  )
+})
+
+test('allows bookings that begin exactly when another ends', () => {
+  assert.equal(
+    hasTimeConflict(12, 14, 10, 12),
+    false,
+  )
+})
+
+test('rejects a zero-length interval in conflict checking', () => {
+  assert.throws(
+    () => hasTimeConflict(10, 10, 11, 12),
+    /INVALID_TIME_RANGE/,
+  )
+})
+
+test('rejects non-finite timestamps in conflict checking', () => {
+  assert.throws(
+    () => hasTimeConflict(Number.NaN, 12, 11, 13),
+    /INVALID_TIME_RANGE/,
+  )
+})

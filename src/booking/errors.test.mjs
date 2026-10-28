@@ -24,10 +24,60 @@ test('normalizes an authentication error', () => {
   assert.equal(result.message, 'Please sign in to continue.')
 })
 
-test('uses a safe message for unknown errors', () => {
-  const result = normalizeBookingError(
-    new Error('internal database details'),
+test('normalizes a direct booking error code from an object', () => {
+  const result = normalizeBookingError({
+    code: 'NOT_AUTHORISED',
+    message: 'Permission denied',
+  })
+
+  assert.equal(result.code, 'NOT_AUTHORISED')
+  assert.equal(
+    result.message,
+    'You are not allowed to perform this action.',
   )
+})
+
+test('normalizes a booking code embedded in a plain object message', () => {
+  const result = normalizeBookingError({
+    message: 'INVALID_STATUS_TRANSITION: cannot approve',
+  })
+
+  assert.equal(result.code, 'INVALID_STATUS_TRANSITION')
+  assert.equal(
+    result.message,
+    'This booking can no longer be updated in that way.',
+  )
+})
+
+test('normalizes an ineligible booking error', () => {
+  const result = normalizeBookingError({
+    code: 'INELIGIBLE',
+    message: 'Eligibility check failed',
+  })
+
+  assert.equal(result.code, 'INELIGIBLE')
+  assert.equal(
+    result.message,
+    'You are not eligible to book this equipment.',
+  )
+})
+
+test('does not expose internal details in unknown errors', () => {
+  const internalMessage =
+    'internal database details: connection credentials unavailable'
+
+  const result = normalizeBookingError(new Error(internalMessage))
+
+  assert.equal(result.code, 'UNKNOWN_ERROR')
+  assert.equal(
+    result.message,
+    'Something went wrong. Please try again.',
+  )
+  assert.equal(result.message.includes(internalMessage), false)
+})
+
+test('handles non-Error values safely', () => {
+  const result = normalizeBookingError(null)
 
   assert.equal(result.code, 'UNKNOWN_ERROR')
   assert.equal(
@@ -36,8 +86,26 @@ test('uses a safe message for unknown errors', () => {
   )
 })
 
-test('handles non-Error values safely', () => {
-  const result = normalizeBookingError(null)
+test('handles an unknown object safely', () => {
+  const result = normalizeBookingError({
+    detail: 'internal database information',
+  })
 
   assert.equal(result.code, 'UNKNOWN_ERROR')
+  assert.equal(
+    result.message,
+    'Something went wrong. Please try again.',
+  )
+})
+
+test('handles a plain string error safely', () => {
+  const result = normalizeBookingError(
+    'unexpected internal database failure',
+  )
+
+  assert.equal(result.code, 'UNKNOWN_ERROR')
+  assert.equal(
+    result.message,
+    'Something went wrong. Please try again.',
+  )
 })

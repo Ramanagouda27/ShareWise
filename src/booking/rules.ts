@@ -89,5 +89,23 @@ export function hasTimeConflict(
   existingStart: number,
   existingEnd: number,
 ): boolean {
+  const timestamps = [
+    requestedStart,
+    requestedEnd,
+    existingStart,
+    existingEnd,
+  ]
+
+  if (!timestamps.every(Number.isFinite)) {
+    throw new Error('INVALID_TIME_RANGE: timestamps must be finite numbers')
+  }
+
+  if (
+    requestedEnd <= requestedStart ||
+    existingEnd <= existingStart
+  ) {
+    throw new Error('INVALID_TIME_RANGE: interval end must follow start')
+  }
+
   return requestedStart < existingEnd && existingStart < requestedEnd
 }
