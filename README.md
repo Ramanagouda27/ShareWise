@@ -78,13 +78,26 @@ Install dependencies:
 npm install
 ```
 
+### Configure environment variables
+
+The Supabase client expects these variables in a local `.env.local` file:
+
+```dotenv
+VITE_SUPABASE_URL=
+VITE_SUPABASE_ANON_KEY=
+```
+
+Copy the values from your Supabase project settings into your local `.env.local` file. Do not commit `.env.local` or put secret service-role keys in frontend environment variables. The `VITE_` prefix exposes values to browser-side code.
+
+The Supabase client requires both variables to be configured. This initializes the client but does not mean that database-backed booking operations are implemented or verified.
+
+
 Start the development server:
 
 ```bash
 npm run dev
 ```
 
-Open the local URL printed by Vite in your terminal.
 
 ## Validation
 
@@ -96,7 +109,7 @@ The project uses Node.js's built-in test runner and TypeScript type stripping:
 node --experimental-strip-types --test src/booking/rules.test.mjs src/booking/errors.test.mjs
 ```
 
-The booking test suite currently contains 15 tests covering time validation, overlap detection, permitted status transitions, and safe error handling.
+The booking test suite currently contains 26 tests covering time validation, overlap detection, permitted status transitions, and safe error handling.
 
 ### Run lint
 
