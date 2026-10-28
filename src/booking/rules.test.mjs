@@ -71,3 +71,26 @@ test('rejects returning a booking that is still pending', () => {
     /INVALID_STATUS_TRANSITION/,
   )
 })
+
+test('supports all permitted booking status transitions', () => {
+  const cases = [
+    ['pending', 'approve', 'approved'],
+    ['pending', 'reject', 'rejected'],
+    ['pending', 'waitlist', 'waitlisted'],
+    ['pending', 'cancel', 'cancelled'],
+    ['approved', 'cancel', 'cancelled'],
+    ['approved', 'check_out', 'checked_out'],
+    ['waitlisted', 'approve', 'approved'],
+    ['waitlisted', 'cancel', 'cancelled'],
+    ['checked_out', 'return', 'returned'],
+    ['overdue', 'return', 'returned'],
+  ]
+
+  for (const [current, action, expected] of cases) {
+    assert.equal(
+      getNextBookingStatus(current, action),
+      expected,
+      `${current} + ${action} should become ${expected}`,
+    )
+  }
+})
