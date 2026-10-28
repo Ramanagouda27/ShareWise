@@ -8,9 +8,12 @@ import {
 } from './rules.ts'
 
 test('rejects an invalid time range', () => {
+  const start = new Date(Date.now() + 60 * 60 * 1000)
+  const end = new Date(start.getTime() - 60 * 60 * 1000)
+
   const result = validateTimeRange(
-    '2026-10-30T14:00:00+05:30',
-    '2026-10-30T13:00:00+05:30',
+    start.toISOString(),
+    end.toISOString(),
   )
 
   assert.equal(result.valid, false)
@@ -43,6 +46,29 @@ test('allows back-to-back bookings', () => {
     hasTimeConflict(10, 12, 12, 14),
     false,
   )
+})
+
+test('rejects a zero-length booking', () => {
+  const start = new Date(Date.now() + 60 * 60 * 1000)
+  const result = validateTimeRange(
+    start.toISOString(),
+    start.toISOString(),
+  )
+
+  assert.equal(result.valid, false)
+  assert.equal(result.error, 'INVALID_TIME_RANGE')
+})
+
+test('rejects an end time before the start time', () => {
+  const start = new Date(Date.now() + 2 * 60 * 60 * 1000)
+  const end = new Date(start.getTime() - 60 * 60 * 1000)
+  const result = validateTimeRange(
+    start.toISOString(),
+    end.toISOString(),
+  )
+
+  assert.equal(result.valid, false)
+  assert.equal(result.error, 'INVALID_TIME_RANGE')
 })
 
 test('rejects an invalid timestamp', () => {
