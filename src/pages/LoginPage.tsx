@@ -5,11 +5,13 @@ import { useAuth } from '../hooks/useAuth';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
 import { formatErrorMessage } from '../lib/errors';
+import { isMockAuthMode } from '../services/authService';
 
 export const LoginPage: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const { signIn } = useAuth();
+  const showDemoAccess = isMockAuthMode();
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -126,8 +128,8 @@ export const LoginPage: React.FC = () => {
             </Button>
           </form>
 
-          {/* Quick Hackathon Demo Credentials Switcher */}
-          <div className="mt-6 pt-6 border-t border-neutral-100">
+          {/* Demo credentials are available only in mock mode. */}
+          {showDemoAccess && <div className="mt-6 pt-6 border-t border-neutral-100">
             <span className="block text-center text-[11px] uppercase font-bold tracking-wider text-neutral-400 mb-3">
               One-Click Demo Access
             </span>
@@ -153,7 +155,7 @@ export const LoginPage: React.FC = () => {
                 Lab Owner Demo
               </Button>
             </div>
-          </div>
+          </div>}
 
           <div className="mt-6 text-center text-xs text-neutral-500">
             Don't have an account yet?{' '}

@@ -1,12 +1,12 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { User, LoginCredentials, SignupCredentials } from '../types/auth';
-import { authService } from '../services/authService';
+import { authService, isMockAuthMode } from '../services/authService';
 
 interface AuthContextType {
   user: User | null;
   isLoading: boolean;
   signIn: (credentials: LoginCredentials) => Promise<User>;
-  signUp: (credentials: SignupCredentials) => Promise<User>;
+  signUp: (credentials: SignupCredentials) => Promise<User | null>;
   signOut: () => Promise<void>;
   switchDemoRole: (role: 'student' | 'owner') => void;
   isAuthenticated: boolean;
@@ -21,11 +21,26 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [isLoading, setIsLoading] = useState<boolean>(true);
 
   useEffect(() => {
+    let active = true;
+
     const unsubscribe = authService.onAuthStateChange((updatedUser) => {
+      if (!active) return;
       setUser(updatedUser);
       setIsLoading(false);
     });
-    return () => unsubscribe();
+
+    void authService.initialize().catch((error) => {
+      console.error('[ShareWise] Failed to initialize authentication:', error);
+      if (active) {
+        setUser(null);
+        setIsLoading(false);
+      }
+    });
+
+    return () => {
+      active = false;
+      unsubscribe();
+    };
   }, []);
 
   const signIn = async (credentials: LoginCredentials) => {
@@ -56,6 +71,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const switchDemoRole = (role: 'student' | 'owner') => {
+    if (!isMockAuthMode()) return;
     const updated = authService.switchDemoRole(role);
     setUser(updated);
   };

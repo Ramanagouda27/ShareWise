@@ -1,3 +1,4 @@
+
 import React from 'react';
 import { Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../../hooks/useAuth';
@@ -24,14 +25,12 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
     );
   }
 
-  if (!isAuthenticated) {
+  if (!isAuthenticated || !user) {
     return <Navigate to="/login" state={{ from: location }} replace />;
   }
 
-  if (requiredRole && user?.role !== requiredRole && user?.role !== 'admin') {
-    // If user is not the required role (e.g. owner route accessed by student),
-    // redirect or allow demo viewing with banner
-    // In our app, we allow viewing the owner route with a role-switch banner for hackathon judging convenience!
+  if (requiredRole && user.role !== requiredRole && user.role !== 'admin') {
+    return <Navigate to="/" replace />;
   }
 
   return <>{children}</>;

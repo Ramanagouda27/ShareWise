@@ -7,10 +7,12 @@ import { Input } from '../components/ui/Input';
 import { Select } from '../components/ui/Select';
 import { UserRole } from '../types/auth';
 import { formatErrorMessage } from '../lib/errors';
+import { isMockAuthMode } from '../services/authService';
 
 export const SignupPage: React.FC = () => {
   const navigate = useNavigate();
   const { signUp } = useAuth();
+  const showDemoRoleSelection = isMockAuthMode();
 
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
@@ -21,10 +23,12 @@ export const SignupPage: React.FC = () => {
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
+    setSuccessMessage(null);
 
     if (!fullName || !email || !password) {
       setError('Please fill in all required fields.');
@@ -38,7 +42,7 @@ export const SignupPage: React.FC = () => {
 
     setIsLoading(true);
     try {
-      await signUp({
+      const createdUser = await signUp({
         fullName,
         email,
         password,
@@ -46,7 +50,14 @@ export const SignupPage: React.FC = () => {
         studentId: studentId || undefined,
         department: department || undefined,
       });
-      navigate('/resources');
+
+      if (createdUser) {
+        navigate('/resources');
+      } else {
+        setSuccessMessage(
+          'Your account was created. Check your email for the confirmation link, then sign in.'
+        );
+      }
     } catch (err) {
       setError(formatErrorMessage(err));
     } finally {
@@ -96,15 +107,22 @@ export const SignupPage: React.FC = () => {
               leftIcon={<Mail className="w-4 h-4" />}
             />
 
-            <Select
-              label="Account Role"
-              value={role}
-              onChange={(e) => setRole(e.target.value as UserRole)}
-              options={[
-                { label: 'Student Borrower', value: 'student' },
-                { label: 'Lab Custodian / Owner', value: 'owner' },
-              ]}
-            />
+            {showDemoRoleSelection ? (
+              <Select
+                label="Account Role"
+                value={role}
+                onChange={(e) => setRole(e.target.value as UserRole)}
+                options={[
+                  { label: 'Student Borrower', value: 'student' },
+                  { label: 'Lab Custodian / Owner', value: 'owner' },
+                ]}
+              />
+            ) : (
+              <div className="rounded-xl border border-blue-100 bg-blue-50/60 px-3 py-2 text-xs text-blue-800">
+                New live accounts start with student access. Lab owner permissions must be
+                assigned by the authorized backend/admin workflow.
+              </div>
+            )}
 
             {role === 'student' ? (
               <Input
@@ -148,6 +166,12 @@ export const SignupPage: React.FC = () => {
             {error && (
               <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-xs text-rose-700">
                 {error}
+              </div>
+            )}
+
+            {successMessage && (
+              <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-xs text-emerald-800">
+                {successMessage}
               </div>
             )}
 
