@@ -19,7 +19,7 @@ export interface Booking {
   createdAt: string
 }
 
-export type BookingErrorCode =
+export type BookingRpcErrorCode =
   | 'UNAUTHENTICATED'
   | 'NOT_AUTHORISED'
   | 'RESOURCE_UNAVAILABLE'
@@ -27,6 +27,23 @@ export type BookingErrorCode =
   | 'INVALID_TIME_RANGE'
   | 'BOOKING_CONFLICT'
   | 'INVALID_STATUS_TRANSITION'
+
+export type BookingRpcResponse<T> =
+  | {
+      success: true
+      code: 'OK'
+      message: string
+      data: T
+    }
+  | {
+      success: false
+      code: BookingRpcErrorCode
+      message: string
+      data: null
+    }
+
+export type BookingErrorCode =
+  | BookingRpcErrorCode
   | 'NETWORK_ERROR'
   | 'UNKNOWN_ERROR'
 
