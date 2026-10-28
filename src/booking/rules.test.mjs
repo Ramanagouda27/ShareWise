@@ -44,3 +44,30 @@ test('allows back-to-back bookings', () => {
     false,
   )
 })
+
+test('rejects an invalid timestamp', () => {
+  const result = validateTimeRange(
+    'not-a-date',
+    '2026-10-30T15:00:00+05:30',
+  )
+
+  assert.equal(result.valid, false)
+  assert.equal(result.error, 'INVALID_TIME_FORMAT')
+})
+
+test('rejects a start time in the past', () => {
+  const result = validateTimeRange(
+    '2020-01-01T10:00:00+05:30',
+    '2020-01-01T11:00:00+05:30',
+  )
+
+  assert.equal(result.valid, false)
+  assert.equal(result.error, 'START_TIME_MUST_BE_IN_FUTURE')
+})
+
+test('rejects returning a booking that is still pending', () => {
+  assert.throws(
+    () => getNextBookingStatus('pending', 'return'),
+    /INVALID_STATUS_TRANSITION/,
+  )
+})
