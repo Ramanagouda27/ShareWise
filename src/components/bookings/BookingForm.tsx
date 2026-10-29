@@ -1,9 +1,11 @@
+import { AlertCircle, Clock } from 'lucide-react';
 import React, { useState } from 'react';
-import { Calendar, Clock, AlertCircle, CheckCircle2, ShieldCheck } from 'lucide-react';
-import { Resource } from '../../types/resource';
-import { BookingRequestInput } from '../../types/booking';
-import { Button } from '../ui/Button';
 import { formatErrorMessage } from '../../lib/errors';
+import { BookingRequestInput } from '../../types/booking';
+import { Resource } from '../../types/resource';
+import { Button } from '../ui/Button';
+const INITIAL_DEFAULT_START = new Date(Date.now() + 60 * 60 * 1000);
+const INITIAL_DEFAULT_END = new Date(Date.now() + 4 * 60 * 60 * 1000);
 
 export interface BookingFormProps {
   resource: Resource;
@@ -23,11 +25,12 @@ export const BookingForm: React.FC<BookingFormProps> = ({
     return localISOTime;
   };
 
-  const defaultStart = new Date(Date.now() + 3600000); // 1 hour from now
-  const defaultEnd = new Date(Date.now() + 3600000 * 4); // 4 hours from now
-
-  const [startTime, setStartTime] = useState(toLocalInputString(defaultStart));
-  const [endTime, setEndTime] = useState(toLocalInputString(defaultEnd));
+ const [startTime, setStartTime] = useState(
+  toLocalInputString(INITIAL_DEFAULT_START)
+);
+const [endTime, setEndTime] = useState(
+  toLocalInputString(INITIAL_DEFAULT_END)
+);
   const [purposeNotes, setPurposeNotes] = useState('');
   const [acceptedPolicy, setAcceptedPolicy] = useState(false);
   const [validationError, setValidationError] = useState<string | null>(null);

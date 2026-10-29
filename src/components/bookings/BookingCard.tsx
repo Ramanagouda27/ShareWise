@@ -1,9 +1,9 @@
+import { ArrowRight, Calendar, Clock, MapPin } from 'lucide-react';
 import React from 'react';
 import { Link } from 'react-router-dom';
-import { Calendar, Clock, MapPin, ArrowRight, XCircle } from 'lucide-react';
 import { Booking } from '../../types/booking';
-import { BookingStatusBadge } from './BookingStatusBadge';
 import { Button } from '../ui/Button';
+import { BookingStatusBadge } from './BookingStatusBadge';
 
 export interface BookingCardProps {
   booking: Booking;

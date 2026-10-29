@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useCallback, useEffect, useState, useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { resourceService } from '../services/resourceService';
 import { Resource, ResourceFilters as FilterType } from '../types/resource';
@@ -22,22 +22,27 @@ export const ResourcesPage: React.FC = () => {
     availableOnly: searchParams.get('available') === 'true',
   });
 
-  const loadResources = async () => {
-    setIsLoading(true);
-    setError(null);
-    try {
-      const data = await resourceService.listResources(filters);
-      setResources(data);
-    } catch (err) {
-      setError(formatErrorMessage(err));
-    } finally {
-      setIsLoading(false);
-    }
-  };
+  const loadResources = useCallback(async () => {
+  setIsLoading(true);
+  setError(null);
 
-  useEffect(() => {
-    loadResources();
-  }, [filters.category, filters.location, filters.availableOnly]);
+  try {
+    const data = await resourceService.listResources(filters);
+    setResources(data);
+  } catch (err) {
+    setError(formatErrorMessage(err));
+  } finally {
+    setIsLoading(false);
+  }
+}, [filters]);
+
+useEffect(() => {
+  const timer = window.setTimeout(() => {
+    void loadResources();
+  }, 200);
+
+  return () => window.clearTimeout(timer);
+}, [loadResources]);
 
   // Handle search query with slight debounce
   useEffect(() => {
@@ -45,7 +50,7 @@ export const ResourcesPage: React.FC = () => {
       loadResources();
     }, 200);
     return () => clearTimeout(handler);
-  }, [filters.query]);
+  }, [loadResources]);
 
   // Derive unique categories and locations from current datasets
   const categories = useMemo(() => {

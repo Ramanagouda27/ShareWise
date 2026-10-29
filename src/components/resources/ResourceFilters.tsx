@@ -1,5 +1,5 @@
+import { Check, Search, X } from 'lucide-react';
 import React from 'react';
-import { Search, X, SlidersHorizontal, Check } from 'lucide-react';
 import { ResourceFilters as FilterType } from '../../types/resource';
 
 export interface ResourceFiltersProps {

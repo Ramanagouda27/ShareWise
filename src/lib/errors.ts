@@ -8,6 +8,7 @@ export type ErrorCode =
   | 'INVALID_TIME_RANGE'
   | 'ELIGIBILITY_FAILED'
   | 'INVALID_STATUS_TRANSITION'
+  | 'INVALID_INPUT'
   | 'NETWORK_FAILURE'
   | 'MISSING_CONFIG'
   | 'UNKNOWN_ERROR';
@@ -20,6 +21,7 @@ const ERROR_MESSAGES: Record<ErrorCode, string> = {
   INVALID_TIME_RANGE: 'Invalid reservation time: End time must be later than start time (minimum 30 minutes).',
   ELIGIBILITY_FAILED: 'You do not meet the institutional eligibility requirements (e.g. required lab safety briefing).',
   INVALID_STATUS_TRANSITION: 'This booking status transition is not permitted in its current state.',
+  INVALID_INPUT: 'Please correct the input and try again.',
   NETWORK_FAILURE: 'Unable to reach the server. Please check your network connection and retry.',
   MISSING_CONFIG: 'Missing application configuration. Contact support or check environment variables.',
   UNKNOWN_ERROR: 'An unexpected error occurred. Please try again or contact the lab administrator.',

@@ -1,9 +1,9 @@
+import { CheckCircle2, ShieldCheck } from 'lucide-react';
 import React, { useState } from 'react';
-import { Modal } from '../ui/Modal';
-import { Button } from '../ui/Button';
 import { Booking } from '../../types/booking';
 import { ConditionGrade } from '../../types/conditionReport';
-import { CheckCircle2, AlertTriangle, ShieldCheck } from 'lucide-react';
+import { Button } from '../ui/Button';
+import { Modal } from '../ui/Modal';
 
 export interface ConditionReportModalProps {
   isOpen: boolean;
@@ -49,9 +49,13 @@ export const ConditionReportModal: React.FC<ConditionReportModalProps> = ({
     try {
       await onSubmit(grade, notes.trim() || `Inspection completed in ${grade} grade.`);
       onClose();
-    } catch (err: any) {
-      setError(err?.message || 'Failed to submit condition report');
-    }
+    } catch (err: unknown) {
+  setError(
+    err instanceof Error
+      ? err.message
+      : 'Failed to submit condition report'
+  );
+}
   };
 
   return (

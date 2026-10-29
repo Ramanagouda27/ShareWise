@@ -1,5 +1,5 @@
+import { CheckCircle2, Clock, PackageCheck, ShieldAlert } from 'lucide-react';
 import React from 'react';
-import { CheckCircle2, Clock, Calendar, ArrowRight, ShieldAlert, PackageCheck } from 'lucide-react';
 import { Booking } from '../../types/booking';
 
 export interface BookingTimelineProps {

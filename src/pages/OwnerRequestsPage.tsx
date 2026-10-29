@@ -1,27 +1,21 @@
-import React, { useEffect, useState, useMemo } from 'react';
 import {
-  ShieldCheck,
   CheckCircle2,
-  XCircle,
-  Clock,
-  Layers,
-  Filter,
-  PackageCheck,
-  RotateCcw,
-  AlertTriangle,
+  ShieldCheck,
+  XCircle
 } from 'lucide-react';
-import { bookingService } from '../services/bookingService';
-import { Booking, BookingReviewInput } from '../types/booking';
-import { ConditionGrade } from '../types/conditionReport';
-import { useAuth } from '../hooks/useAuth';
-import { PageHeader } from '../components/ui/PageHeader';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { BookingCard } from '../components/bookings/BookingCard';
-import { Modal } from '../components/ui/Modal';
+import { ConditionReportModal } from '../components/bookings/ConditionReportModal';
 import { Button } from '../components/ui/Button';
 import { EmptyState } from '../components/ui/EmptyState';
 import { ErrorState } from '../components/ui/ErrorState';
-import { ConditionReportModal } from '../components/bookings/ConditionReportModal';
+import { Modal } from '../components/ui/Modal';
+import { PageHeader } from '../components/ui/PageHeader';
+import { useAuth } from '../hooks/useAuth';
 import { formatErrorMessage } from '../lib/errors';
+import { bookingService } from '../services/bookingService';
+import { Booking } from '../types/booking';
+import { ConditionGrade } from '../types/conditionReport';
 
 export const OwnerRequestsPage: React.FC = () => {
   const { user, isOwner, switchDemoRole } = useAuth();
@@ -43,22 +37,27 @@ export const OwnerRequestsPage: React.FC = () => {
   const [conditionStage, setConditionStage] = useState<'checkout' | 'return'>('checkout');
   const [isSubmittingCondition, setIsSubmittingCondition] = useState(false);
 
-  const loadRequests = async () => {
-    setIsLoading(true);
-    setError(null);
-    try {
-      const data = await bookingService.listOwnerRequests(user?.id);
-      setRequests(data);
-    } catch (err) {
-      setError(formatErrorMessage(err));
-    } finally {
-      setIsLoading(false);
-    }
-  };
+ const loadRequests = useCallback(async () => {
+  setIsLoading(true);
+  setError(null);
 
-  useEffect(() => {
-    loadRequests();
-  }, [user?.id]);
+  try {
+    const data = await bookingService.listOwnerRequests(user?.id);
+    setRequests(data);
+  } catch (err) {
+    setError(formatErrorMessage(err));
+  } finally {
+    setIsLoading(false);
+  }
+}, [user]);
+
+useEffect(() => {
+  const timer = window.setTimeout(() => {
+    void loadRequests();
+  }, 0);
+
+  return () => window.clearTimeout(timer);
+}, [loadRequests]);
 
   const filtered = useMemo(() => {
     if (filterTab === 'all') return requests;

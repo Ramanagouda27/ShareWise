@@ -1,20 +1,17 @@
-import React, { useState } from 'react';
-import { Link, useLocation, useNavigate } from 'react-router-dom';
 import {
-  Cpu,
-  Menu,
-  X,
   Calendar,
-  Layers,
-  ShieldCheck,
-  LogOut,
-  UserCheck,
   ChevronDown,
   Database,
+  Layers,
+  LogOut,
+  Menu,
+  X
 } from 'lucide-react';
+import React, { useState } from 'react';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../hooks/useAuth';
-import { Button } from '../ui/Button';
 import { getDataSourceName } from '../../services/resourceService';
+import { Button } from '../ui/Button';
 
 export const Navbar: React.FC = () => {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);

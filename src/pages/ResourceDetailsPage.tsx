@@ -1,33 +1,29 @@
-import React, { useEffect, useState } from 'react';
-import { useParams, Link, useNavigate } from 'react-router-dom';
 import {
-  MapPin,
-  Clock,
-  ShieldCheck,
-  CheckCircle2,
-  Wrench,
-  AlertCircle,
-  Calendar,
-  UserCheck,
   ArrowLeft,
-  Share2,
+  CheckCircle2,
+  Clock,
+  MapPin,
+  ShieldCheck,
+  Wrench
 } from 'lucide-react';
-import { resourceService } from '../services/resourceService';
-import { bookingService } from '../services/bookingService';
-import { Resource } from '../types/resource';
-import { BookingRequestInput } from '../types/booking';
+import React, { useCallback, useEffect, useState } from 'react';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import { BookingForm } from '../components/bookings/BookingForm';
-import { Skeleton } from '../components/ui/Skeleton';
+import { Button } from '../components/ui/Button';
 import { ErrorState } from '../components/ui/ErrorState';
 import { Modal } from '../components/ui/Modal';
-import { Button } from '../components/ui/Button';
+import { Skeleton } from '../components/ui/Skeleton';
 import { useAuth } from '../hooks/useAuth';
 import { formatErrorMessage } from '../lib/errors';
+import { bookingService } from '../services/bookingService';
+import { resourceService } from '../services/resourceService';
+import { BookingRequestInput } from '../types/booking';
+import { Resource } from '../types/resource';
 
 export const ResourceDetailsPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { user, isAuthenticated } = useAuth();
+  const { user } = useAuth();
 
   const [resource, setResource] = useState<Resource | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -38,23 +34,29 @@ export const ResourceDetailsPage: React.FC = () => {
   // Success modal state after booking request
   const [successBookingId, setSuccessBookingId] = useState<string | null>(null);
 
-  const loadResource = async () => {
-    if (!id) return;
-    setIsLoading(true);
-    setError(null);
-    try {
-      const data = await resourceService.getResourceById(id);
-      setResource(data);
-    } catch (err) {
-      setError(formatErrorMessage(err));
-    } finally {
-      setIsLoading(false);
-    }
-  };
+  const loadResource = useCallback(async () => {
+  if (!id) return;
 
-  useEffect(() => {
-    loadResource();
-  }, [id]);
+  setIsLoading(true);
+  setError(null);
+
+  try {
+    const data = await resourceService.getResourceById(id);
+    setResource(data);
+  } catch (err) {
+    setError(formatErrorMessage(err));
+  } finally {
+    setIsLoading(false);
+  }
+}, [id]);
+
+useEffect(() => {
+  const timer = window.setTimeout(() => {
+    void loadResource();
+  }, 0);
+
+  return () => window.clearTimeout(timer);
+}, [loadResource]);
 
   const handleBookingSubmit = async (input: BookingRequestInput) => {
     if (!user) {

@@ -1,24 +1,18 @@
-import React, { useEffect, useState, useMemo } from 'react';
-import { Link } from 'react-router-dom';
 import {
-  Calendar,
-  Clock,
-  CheckCircle2,
-  AlertCircle,
-  PackageCheck,
-  PlusCircle,
-  RotateCcw,
+  PlusCircle
 } from 'lucide-react';
-import { bookingService } from '../services/bookingService';
-import { Booking, BookingSummaryStats } from '../types/booking';
-import { useAuth } from '../hooks/useAuth';
-import { PageHeader } from '../components/ui/PageHeader';
+import React, { useEffect, useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { BookingCard } from '../components/bookings/BookingCard';
 import { Button } from '../components/ui/Button';
 import { EmptyState } from '../components/ui/EmptyState';
 import { ErrorState } from '../components/ui/ErrorState';
 import { Modal } from '../components/ui/Modal';
+import { PageHeader } from '../components/ui/PageHeader';
+import { useAuth } from '../hooks/useAuth';
 import { formatErrorMessage } from '../lib/errors';
+import { bookingService } from '../services/bookingService';
+import { Booking, BookingSummaryStats } from '../types/booking';
 
 export const MyBookingsPage: React.FC = () => {
   const { user } = useAuth();
@@ -53,8 +47,35 @@ export const MyBookingsPage: React.FC = () => {
   };
 
   useEffect(() => {
-    loadData();
-  }, [user?.id]);
+  let cancelled = false;
+
+  if (!user?.id) {
+    return () => {
+      cancelled = true;
+    };
+  }
+
+  Promise.all([
+    bookingService.listMyBookings(user.id),
+    bookingService.getBookingSummaryStats(user.id),
+  ])
+    .then(([list, userStats]) => {
+      if (cancelled) return;
+
+      setBookings(list);
+      setStats(userStats);
+    })
+    .catch((err: unknown) => {
+      if (!cancelled) setError(formatErrorMessage(err));
+    })
+    .finally(() => {
+      if (!cancelled) setIsLoading(false);
+    });
+
+  return () => {
+    cancelled = true;
+  };
+}, [user?.id]);
 
   const handleCancelBooking = async () => {
     if (!cancelTargetId || !user) return;

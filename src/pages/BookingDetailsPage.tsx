@@ -1,26 +1,22 @@
-import React, { useEffect, useState } from 'react';
-import { useParams, Link, useNavigate } from 'react-router-dom';
 import {
+  AlertTriangle,
+  ArrowLeft,
   Calendar,
   Clock,
-  MapPin,
-  ArrowLeft,
-  ShieldCheck,
-  FileText,
-  AlertTriangle,
-  CheckCircle2,
-  XCircle,
+  ShieldCheck
 } from 'lucide-react';
-import { bookingService } from '../services/bookingService';
-import { Booking } from '../types/booking';
+import React, { useEffect, useState } from 'react';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import { BookingStatusBadge } from '../components/bookings/BookingStatusBadge';
 import { BookingTimeline } from '../components/bookings/BookingTimeline';
 import { Button } from '../components/ui/Button';
-import { Skeleton } from '../components/ui/Skeleton';
 import { ErrorState } from '../components/ui/ErrorState';
 import { Modal } from '../components/ui/Modal';
+import { Skeleton } from '../components/ui/Skeleton';
 import { useAuth } from '../hooks/useAuth';
 import { formatErrorMessage } from '../lib/errors';
+import { bookingService } from '../services/bookingService';
+import { Booking } from '../types/booking';
 
 export const BookingDetailsPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -46,10 +42,31 @@ export const BookingDetailsPage: React.FC = () => {
       setIsLoading(false);
     }
   };
+useEffect(() => {
+  let cancelled = false;
 
-  useEffect(() => {
-    loadBooking();
-  }, [id]);
+  if (!id) {
+    return () => {
+      cancelled = true;
+    };
+  }
+
+  bookingService
+    .getBookingById(id)
+    .then((data) => {
+      if (!cancelled) setBooking(data);
+    })
+    .catch((err: unknown) => {
+      if (!cancelled) setError(formatErrorMessage(err));
+    })
+    .finally(() => {
+      if (!cancelled) setIsLoading(false);
+    });
+
+  return () => {
+    cancelled = true;
+  };
+}, [id]);
 
   const handleCancel = async () => {
     if (!booking || !user) return;

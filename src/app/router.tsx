@@ -19,7 +19,7 @@ export const AppRouter: React.FC = () => {
         <Route path="/" element={<HomePage />} />
         <Route path="/resources" element={<ResourcesPage />} />
         <Route path="/resources/:id" element={<ResourceDetailsPage />} />
-        
+
         {/* Protected Student Dashboard */}
         <Route
           path="/my-bookings"
@@ -29,7 +29,7 @@ export const AppRouter: React.FC = () => {
             </ProtectedRoute>
           }
         />
-        
+
         {/* Protected Booking Details */}
         <Route
           path="/bookings/:id"
@@ -39,7 +39,7 @@ export const AppRouter: React.FC = () => {
             </ProtectedRoute>
           }
         />
-        
+
         {/* Equipment Custodian / Owner Dashboard */}
         <Route
           path="/owner/requests"
@@ -49,11 +49,11 @@ export const AppRouter: React.FC = () => {
             </ProtectedRoute>
           }
         />
-        
+
         {/* Auth routes */}
         <Route path="/login" element={<LoginPage />} />
         <Route path="/signup" element={<SignupPage />} />
-        
+
         {/* Fallback 404 */}
         <Route path="/404" element={<NotFoundPage />} />
         <Route path="*" element={<Navigate to="/404" replace />} />

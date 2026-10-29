@@ -1,6 +1,6 @@
+import { HeartHandshake, ShieldCheck } from 'lucide-react';
 import React from 'react';
 import { Link } from 'react-router-dom';
-import { Cpu, ShieldCheck, HeartHandshake, Compass } from 'lucide-react';
 
 export const Footer: React.FC = () => {
   return (

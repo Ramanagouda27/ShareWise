@@ -1,0 +1,4 @@
+ShareWise-db-verify/
+**/*.bak
+**/*.csv
+.env*
