@@ -41,6 +41,8 @@ DECLARE
     v_booking_id UUID;
     v_blocked_booking_id UUID;
     v_maintenance_booking_id UUID;
+    v_rejection_booking_id UUID;
+    v_booking_count_before INT;
     v_conflicting_block_id UUID;
     v_res JSONB;
     v_conflict_res JSONB;
@@ -127,6 +129,29 @@ BEGIN
     ASSERT (v_res->'data'->>'status') = 'pending', 'Test 2 Failed: Initial status must be pending';
     ASSERT (v_res->'data'->>'requesterId') = v_requester_id::text, 'Test 2 Failed: Requester ID mismatch';
     RAISE NOTICE 'Test 2 Passed: Booking successfully created in pending status.';
+
+
+    -- ======================================================================
+    -- TEST 2C: Database enforces the 30-minute minimum (not just the UI)
+    -- ======================================================================
+    SELECT pg_catalog.count(*) INTO v_booking_count_before
+    FROM public.bookings WHERE resource_id = v_resource_id;
+
+    v_conflict_res := public.request_booking(
+        v_resource_id,
+        now() + interval '3 hours',
+        now() + interval '3 hours 15 minutes',
+        'Regression: booking shorter than minimum'
+    );
+    ASSERT (v_conflict_res->>'success')::boolean = false,
+        'Test 2C Failed: A 15-minute booking must be rejected';
+    ASSERT (v_conflict_res->>'code') = 'INVALID_TIME_RANGE',
+        'Test 2C Failed: Expected INVALID_TIME_RANGE for a booking shorter than 30 minutes';
+    ASSERT v_conflict_res->>'data' IS NULL,
+        'Test 2C Failed: Rejected short booking must have null data';
+    ASSERT (SELECT pg_catalog.count(*) FROM public.bookings WHERE resource_id = v_resource_id) = v_booking_count_before,
+        'Test 2C Failed: Short booking created a database row';
+    RAISE NOTICE 'Test 2C Passed: Database rejected a booking shorter than 30 minutes.';
 
     -- ======================================================================
     -- TEST 2A: Lifecycle trigger rejects a direct update with the flag absent
@@ -365,6 +390,46 @@ BEGIN
         'Test 7C Failed: Booking status must remain pending';
     UPDATE public.resources SET status = 'active' WHERE id = v_resource_id;
     RAISE NOTICE 'Test 7C Passed: Approval rejected because resource entered maintenance after request.';
+
+
+    -- ======================================================================
+    -- TEST 7D: Reject decision requires a non-empty reason
+    -- ======================================================================
+    PERFORM pg_catalog.set_config('request.jwt.claim.sub', v_requester_id::text, true);
+    v_res := public.request_booking(
+        v_resource_id,
+        now() + interval '70 hours',
+        now() + interval '71 hours',
+        'Regression: rejection reason validation'
+    );
+    ASSERT (v_res->>'success')::boolean = true,
+        'Test 7D Failed: Test booking request should succeed';
+    v_rejection_booking_id := (v_res->'data'->>'id')::uuid;
+
+    PERFORM pg_catalog.set_config('request.jwt.claim.sub', v_owner_id::text, true);
+    v_res := public.review_booking(v_rejection_booking_id, 'reject', '   ');
+    ASSERT (v_res->>'success')::boolean = false,
+        'Test 7D Failed: Reject with blank reason must fail';
+    ASSERT (v_res->>'code') = 'INVALID_INPUT',
+        'Test 7D Failed: Expected INVALID_INPUT for blank rejection reason';
+    ASSERT v_res->>'data' IS NULL,
+        'Test 7D Failed: Invalid rejection must return null data';
+    ASSERT (SELECT status FROM public.bookings WHERE id = v_rejection_booking_id) = 'pending',
+        'Test 7D Failed: Invalid rejection changed the booking status';
+
+    v_res := public.review_booking(
+        v_rejection_booking_id,
+        'reject',
+        'Equipment unavailable during the requested period'
+    );
+    ASSERT (v_res->>'success')::boolean = true,
+        'Test 7D Failed: Reject with a valid reason should succeed';
+    ASSERT (v_res->'data'->>'status') = 'rejected',
+        'Test 7D Failed: Booking should be rejected when reason is provided';
+    ASSERT (SELECT decision_reason FROM public.bookings WHERE id = v_rejection_booking_id)
+           = 'Equipment unavailable during the requested period',
+        'Test 7D Failed: Rejection reason was not persisted';
+    RAISE NOTICE 'Test 7D Passed: Blank rejection reason rejected; valid reason persisted.';
 
     -- ==========================================================================
     -- TEST 8: Check-in / Checkout transition and initial condition report

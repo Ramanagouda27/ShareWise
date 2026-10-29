@@ -31,6 +31,7 @@ BEGIN
     ) OR EXISTS (
         SELECT 1 FROM public.resources
         WHERE id = '77777777-7777-4777-8777-777777777703'::uuid
+           OR id = '77777777-7777-4777-8777-777777777705'::uuid
     ) OR EXISTS (
         SELECT 1 FROM public.bookings
         WHERE id = '77777777-7777-4777-8777-777777777704'::uuid
@@ -56,6 +57,43 @@ VALUES (
     '77777777-7777-4777-8777-777777777701'::uuid,
     'Booking time permission test resource', 'test', 'Local test database', 'active'
 );
+
+INSERT INTO public.resources (id, owner_id, name, category, location, status)
+VALUES (
+    '77777777-7777-4777-8777-777777777705'::uuid,
+    '77777777-7777-4777-8777-777777777701'::uuid,
+    'Anonymous visibility maintenance fixture', 'test', 'Local test database', 'maintenance'
+);
+
+
+
+-- Anonymous users may browse active catalog rows, but not maintenance resources.
+SET LOCAL ROLE anon;
+DO $$
+DECLARE
+    v_active_visible bigint;
+    v_maintenance_visible bigint;
+BEGIN
+    ASSERT current_user = 'anon',
+        'Anonymous resource visibility test must run as the anon database role.';
+    ASSERT pg_catalog.has_table_privilege(current_user, 'public.resources', 'SELECT'),
+        'anon must have SELECT privilege on public.resources.';
+
+    SELECT pg_catalog.count(*) INTO v_active_visible
+    FROM public.resources
+    WHERE id = '77777777-7777-4777-8777-777777777703'::uuid;
+    ASSERT v_active_visible = 1,
+        'anon should be able to see an active resource.';
+
+    SELECT pg_catalog.count(*) INTO v_maintenance_visible
+    FROM public.resources
+    WHERE id = '77777777-7777-4777-8777-777777777705'::uuid;
+    ASSERT v_maintenance_visible = 0,
+        'anon must not be able to see a resource in maintenance.';
+    RAISE NOTICE 'PASS: anon can see active resources and cannot see maintenance resources.';
+END;
+$$;
+RESET ROLE;
 
 INSERT INTO public.bookings (id, resource_id, requester_id, start_time, end_time, purpose, status)
 VALUES (

@@ -94,6 +94,17 @@ BEGIN
         )::jsonb;
     END IF;
 
+
+    -- Enforce the same 30-minute minimum as the frontend; callers can bypass UI validation.
+    IF p_end_time - p_start_time < INTERVAL '30 minutes' THEN
+        RETURN pg_catalog.json_build_object(
+            'success', false,
+            'code', 'INVALID_TIME_RANGE',
+            'message', 'Booking duration must be at least 30 minutes.',
+            'data', NULL
+        )::jsonb;
+    END IF;
+
     -- 3. Lock resource row to prevent concurrent race conditions
     SELECT * INTO v_resource
     FROM public.resources
@@ -347,6 +358,17 @@ BEGIN
 
     -- Determine allowed transitions per src/booking/rules.ts
     v_clean_decision := pg_catalog.lower(pg_catalog.btrim(COALESCE(p_decision, '')));
+
+    IF v_clean_decision = 'reject'
+       AND pg_catalog.btrim(COALESCE(p_reason, '')) = '' THEN
+        RETURN pg_catalog.json_build_object(
+            'success', false,
+            'code', 'INVALID_INPUT',
+            'message', 'A rejection reason is required.',
+            'data', NULL
+        )::jsonb;
+    END IF;
+
     IF v_booking.status = 'pending' THEN
         IF v_clean_decision = 'approve' THEN
             v_next_status := 'approved';

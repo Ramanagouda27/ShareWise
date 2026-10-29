@@ -505,6 +505,7 @@ REVOKE ALL ON TABLE public.audit_events FROM PUBLIC, anon, authenticated;
 -- Authenticated users can create resources (trigger and RLS enforce owner_id = auth.uid()).
 -- Column-level update permissions allow modifying resource attributes only (cannot change id, owner_id, created_at).
 GRANT SELECT, INSERT ON TABLE public.resources TO authenticated;
+GRANT SELECT ON TABLE public.resources TO anon;
 GRANT UPDATE (name, description, category, location, image_path, usage_rules, required_training, max_booking_minutes, status)
     ON TABLE public.resources TO authenticated;
 
@@ -555,8 +556,15 @@ GRANT SELECT ON TABLE public.audit_events TO authenticated;
 -- 1. Resources RLS Policies
 -- ------------------------------------------------------------------------------
 DROP POLICY IF EXISTS "Authenticated users can view resources" ON public.resources;
+DROP POLICY IF EXISTS "Anonymous users can view active resources" ON public.resources;
 DROP POLICY IF EXISTS "Resource owners can insert resources" ON public.resources;
 DROP POLICY IF EXISTS "Resource owners can update their resources" ON public.resources;
+
+CREATE POLICY "Anonymous users can view active resources"
+    ON public.resources
+    FOR SELECT
+    TO anon
+    USING (status = 'active');
 
 CREATE POLICY "Authenticated users can view resources"
     ON public.resources
