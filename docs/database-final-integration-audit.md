@@ -149,3 +149,83 @@ A fresh, isolated disposable database `sharewise_security_run_20261029_db` was c
 4. **Transaction-Local Flag Scope Test (`booking_transition_flag_scope.sql`)**:
    - Executed in a single persistent `psql` session.
    - Results: Verified that `sharewise.authorized_booking_transition` reverted to session `false` baseline after both `COMMIT` and `ROLLBACK`. Exit status: 0.
+
+## Member 3 Database Contract-Fix Integration & Verification (2026-10-30)
+
+### 1. Commit and Files
+- **Branch:** `feat/profiles-migration-integration` (handoff branch: `handoff/member3-db-contract-fixes`)
+- **Committed SHA:** `577219d9603bf2740ffa8c99373b8253ee2b2804` (`577219d`)
+- **Commit Message:** `fix(backend): enforce booking rules and resource visibility`
+- **Files Modified (4 files, +133 lines, -0 lines):**
+  1. `supabase/migrations/202610280002_sharewise_core_tables.sql` (+8 lines):
+     - `GRANT SELECT ON TABLE public.resources TO anon;`
+     - RLS Policy `"Anonymous users can view active resources"`: `FOR SELECT TO anon USING (status = 'active')`.
+  2. `supabase/migrations/202610280003_booking_rpcs.sql` (+22 lines):
+     - `request_booking`: database enforcement of 30-minute minimum booking duration (`IF p_end_time - p_start_time < INTERVAL '30 minutes'` returning `INVALID_TIME_RANGE`).
+     - `review_booking`: validation guard requiring non-empty rejection reason (`IF v_clean_decision = 'reject' AND pg_catalog.btrim(COALESCE(p_reason, '')) = ''` returning `INVALID_INPUT`).
+  3. `supabase/tests/booking_rpcs_test.sql` (+65 lines):
+     - **Test 2C**: Verifies database-level 30-minute minimum rejection (15-minute booking rejected with `INVALID_TIME_RANGE`, returns null data, asserts no row created in `public.bookings`).
+     - **Test 7D**: Verifies rejection reason validation (blank/whitespace-only rejection rejected with `INVALID_INPUT`, status remains `pending`; valid reason succeeds, transitions status to `rejected`, and persists to `decision_reason`).
+  4. `supabase/tests/booking_time_permissions_authenticated.sql` (+38 lines):
+     - Added maintenance resource fixture (`status = 'maintenance'`).
+     - Under `SET LOCAL ROLE anon`: verified `anon` role has `SELECT` privilege on `public.resources`, can select active resource (count = 1), and is denied from selecting maintenance resource (count = 0).
+
+### 2. Disposable Verification Environment & Commands
+- **Environment:** Local Docker container `sharewise-postgres-test` running PostgreSQL 16.15.
+- **Disposable Database:** `sharewise_member3_verify_db` (freshly created for this test run; dropped after verification).
+- **Execution Log:**
+  1. **Database Creation:**
+     ```bash
+     docker exec sharewise-postgres-test psql -U sharewise_test -d postgres -c "CREATE DATABASE sharewise_member3_verify_db OWNER sharewise_test ENCODING 'UTF8' LC_COLLATE 'en_US.utf8' LC_CTYPE 'en_US.utf8' TEMPLATE template0;"
+     ```
+     Exit code: `0`.
+  2. **Bootstrap:**
+     ```bash
+     docker exec sharewise-postgres-test psql -X -U sharewise_test -d sharewise_member3_verify_db -v ON_ERROR_STOP=1 -f /tmp/m3_bootstrap.sql
+     ```
+     Exit code: `0`.
+  3. **Migration 001 (`202610280001_profiles.sql`):**
+     ```bash
+     docker exec sharewise-postgres-test psql -X -U sharewise_test -d sharewise_member3_verify_db -v ON_ERROR_STOP=1 -f /tmp/m3_migration001.sql
+     ```
+     Exit code: `0`.
+  4. **Migration 002 (`202610280002_sharewise_core_tables.sql`):**
+     ```bash
+     docker exec sharewise-postgres-test psql -X -U sharewise_test -d sharewise_member3_verify_db -v ON_ERROR_STOP=1 -f /tmp/m3_migration002.sql
+     ```
+     Exit code: `0`.
+  5. **Migration 003 (`202610280003_booking_rpcs.sql`):**
+     ```bash
+     docker exec sharewise-postgres-test psql -X -U sharewise_test -d sharewise_member3_verify_db -v ON_ERROR_STOP=1 -f /tmp/m3_migration003.sql
+     ```
+     Exit code: `0`.
+  6. **Test Suite 1 (`booking_rpcs_test.sql`):**
+     ```bash
+     docker exec sharewise-postgres-test psql -X -U sharewise_test -d sharewise_member3_verify_db -v ON_ERROR_STOP=1 -f /tmp/m3_booking_rpcs_test.sql
+     ```
+     Exit code: `0`.
+     - Output notices: Test 1 Passed, Test 2 Passed, Test 2C Passed, Tests 2A-2B Passed, Test 3 Passed, Test 4 Passed, Test 5 Passed, Test 6 Passed, Test 7 Passed, Test 7A Passed, Test 7B Passed, Test 7C Passed, Test 7D Passed, Test 8 Passed, Test 9 Passed, Test 10 Passed, Test 11 Passed, Test 12 NOT RUN (deferred to Suite 2 by design), Test 13 Passed.
+     - Result: 17/17 runnable checks passed; transaction executed `ROLLBACK`.
+  7. **Test Suite 2 (`booking_time_permissions_authenticated.sql`):**
+     ```bash
+     docker exec sharewise-postgres-test psql -X -U sharewise_test -d sharewise_member3_verify_db -v ON_ERROR_STOP=1 -f /tmp/m3_time_perms_test.sql
+     ```
+     Exit code: `0`.
+     - Output notices:
+       - `PASS: anon can see active resources and cannot see maintenance resources.`
+       - `PASS: authenticated direct INSERT into condition_reports and UPDATE of booking time/lifecycle columns were privilege-denied; RLS own/other-row controls also behaved as expected.`
+     - Result: All assertions passed; transaction executed `ROLLBACK`.
+  8. **Cleanup Verification & Tear Down:**
+     - Querying row counts across all public tables (`audit_events`, `availability_blocks`, `bookings`, `condition_reports`, `eligibility_records`, `incidents`, `profiles`, `resources`) confirmed 0 rows.
+     - `auth.users` confirmed 0 rows.
+     - `DROP DATABASE sharewise_member3_verify_db;` executed cleanly with exit code `0`.
+     - Temporary container files (`/tmp/m3_*.sql`) removed.
+
+### 3. Test Evidence Limitations
+- **Concurrency Test Status:** The four-scenario interactive concurrency test protocol (`concurrent_booking_tests.sql`) was verified historically on 2026-10-29 in `sharewise_concurrency_test_db`. Because it requires manual, synchronized interleaving of two independent interactive psql terminals, raw session transcripts are not automated logs and are documented as historical audit evidence.
+- **Test 12 in Functional Suite:** Explicitly marked `NOT RUN` within `booking_rpcs_test.sql` because testing permission denial for `UPDATE` on booking lifecycle columns requires switching role to `authenticated` outside a single `DO $$` block; this check is fully covered and passed in `booking_time_permissions_authenticated.sql`.
+
+### 4. Migration & Backup Status (Blockers for Deployment)
+- **Live Supabase Migration Ledger:** **NOT VERIFIED**. The shared Supabase database does not have an established `supabase_migrations.schema_migrations` tracking table for migration 001.
+- **Pre-Deployment Full Schema Backup:** **NOT VERIFIED / BLOCKER**. While schema backup automation scripts were developed and reviewed locally for PowerShell syntax and argument safety, no full schema backup has been executed against or validated from live Supabase.
+- **Deployment Status:** **NOT DEPLOYED / LOCAL ONLY**. No migrations, SQL, or repair commands have been run against the remote shared Supabase project. Remote deployment is blocked until an authenticated pre-deployment schema and data backup is verified.
