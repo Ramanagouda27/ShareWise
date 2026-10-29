@@ -6,11 +6,12 @@ export type ResourceCategory =
   | 'Robotics & Drones'
   | 'Computing & AI';
 
+
 export interface ResourceAvailability {
   isAvailable: boolean;
   nextAvailableDate?: string;
-  totalQuantity: number;
-  availableQuantity: number;
+  totalQuantity?: number;
+  availableQuantity?: number;
 }
 
 export interface ResourceOwner {

@@ -42,7 +42,7 @@ export interface BookingRequestInput {
 
 export interface BookingReviewInput {
   bookingId: string;
-  decision: 'approve' | 'reject';
+  decision: 'approve' | 'reject' | 'waitlist';
   rejectionReason?: string;
 }
 

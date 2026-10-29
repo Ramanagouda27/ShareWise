@@ -139,7 +139,7 @@ class MockDataStore {
       return start < bEnd && end > bStart;
     });
 
-    if (hasConflict && resource.availability.availableQuantity <= 1) {
+    if (hasConflict && (resource.availability.availableQuantity ?? 0) <= 1) {
       throw new AppError(
         'BOOKING_CONFLICT',
         'This equipment already has an approved reservation during this time window. Please choose another time.'
@@ -228,24 +228,51 @@ class MockDataStore {
     );
   }
 
-  async reviewBooking(input: BookingReviewInput, reviewer: User): Promise<Booking> {
+
+  async reviewBooking(
+    input: BookingReviewInput,
+    reviewer: User,
+  ): Promise<Booking> {
     await this.delay();
-    const booking = this.bookings.find((b) => b.id === input.bookingId);
+
+    const booking = this.bookings.find(
+      (b) => b.id === input.bookingId,
+    );
+
     if (!booking) {
-      throw new AppError('RESOURCE_UNAVAILABLE', 'Booking record not found.');
+      throw new AppError(
+        'RESOURCE_UNAVAILABLE',
+        'Booking record not found.',
+      );
     }
-    if (booking.status !== 'pending' && booking.status !== 'waitlisted') {
-      throw new AppError('INVALID_STATUS_TRANSITION', `Cannot review a booking that is currently ${booking.status}.`);
+
+    if (
+      booking.status !== 'pending' &&
+      booking.status !== 'waitlisted'
+    ) {
+      throw new AppError(
+        'INVALID_STATUS_TRANSITION',
+        `Cannot review a booking that is currently ${booking.status}.`,
+      );
     }
 
     if (input.decision === 'approve') {
       booking.status = 'approved';
       booking.ownerNotes = `Approved by ${reviewer.fullName}`;
-    } else {
+      booking.rejectionReason = undefined;
+    } else if (input.decision === 'reject') {
       booking.status = 'rejected';
-      booking.rejectionReason = input.rejectionReason || 'Equipment is reserved for institutional lab maintenance.';
+      booking.rejectionReason =
+        input.rejectionReason?.trim() ||
+        'Equipment is reserved for institutional lab maintenance.';
+    } else {
+      booking.status = 'waitlisted';
+      booking.ownerNotes = `Waitlisted by ${reviewer.fullName}`;
+      booking.rejectionReason = undefined;
     }
+
     booking.updatedAt = new Date().toISOString();
+
     this.persist();
     return booking;
   }

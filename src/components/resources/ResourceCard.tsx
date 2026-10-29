@@ -46,7 +46,7 @@ export const ResourceCard: React.FC<ResourceCardProps> = ({ resource }) => {
           {resource.availability.isAvailable ? (
             <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-emerald-500/95 backdrop-blur-xs text-white shadow-xs">
               <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
-              {resource.availability.availableQuantity > 1
+              {(resource.availability.availableQuantity ?? 0) > 1
                 ? `${resource.availability.availableQuantity} Available`
                 : 'Available'}
             </span>

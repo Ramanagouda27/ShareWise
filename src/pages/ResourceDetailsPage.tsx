@@ -149,7 +149,7 @@ export const ResourceDetailsPage: React.FC = () => {
               {resource.availability.isAvailable ? (
                 <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold bg-emerald-500 text-white shadow-xs">
                   <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
-                  {resource.availability.availableQuantity > 1
+                  {(resource.availability.availableQuantity ?? 0) > 1
                     ? `${resource.availability.availableQuantity} Available Now`
                     : 'Available Now'}
                 </span>

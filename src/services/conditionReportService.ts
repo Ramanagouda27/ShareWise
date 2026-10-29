@@ -1,7 +1,7 @@
+
 import { ConditionReport } from '../types/conditionReport';
 import { mockStore } from './mock/mockStore';
 import { isProductionDataMode } from './resourceService';
-import { getSupabaseClient } from './supabaseClient';
 import { AppError } from '../lib/errors';
 
 class ConditionReportService {
@@ -9,29 +9,18 @@ class ConditionReportService {
     report: Omit<ConditionReport, 'id' | 'createdAt'>
   ): Promise<ConditionReport> {
     if (isProductionDataMode()) {
-      const client = getSupabaseClient();
-      if (!client) throw new AppError('MISSING_CONFIG');
+      // In live mode, condition reports are created by the approved
+      // check_in_booking and return_booking RPCs.
+      // Do not insert directly into condition_reports.
+      void report;
 
-      const { data, error } = await client
-        .from('condition_reports')
-        .insert({
-          booking_id: report.bookingId,
-          resource_id: report.resourceId,
-          inspector_id: report.inspectorId,
-          inspector_name: report.inspectorName,
-          stage: report.stage,
-          grade: report.grade,
-          notes: report.notes,
-        })
-        .select()
-        .single();
-
-      if (error) {
-        throw new AppError('NETWORK_FAILURE', error.message);
-      }
-      return data as ConditionReport;
+      throw new AppError(
+        'INVALID_STATUS_TRANSITION',
+        'Live condition reports are created through the booking check-in and return workflows.'
+      );
     }
 
+    // Preserve the existing mock-data workflow.
     return mockStore.createConditionReport(report);
   }
 }

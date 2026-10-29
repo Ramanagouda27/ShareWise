@@ -1,3 +1,4 @@
+
 import {
   Booking,
   BookingRequestInput,
@@ -5,39 +6,331 @@ import {
   CheckoutInput,
   ReturnInput,
   BookingSummaryStats,
+  BookingStatus,
 } from '../types/booking';
 import { User } from '../types/auth';
+import { Resource, ResourceCategory } from '../types/resource';
+import { ConditionReport } from '../types/conditionReport';
 import { mockStore } from './mock/mockStore';
 import { isProductionDataMode } from './resourceService';
 import { getSupabaseClient } from './supabaseClient';
 import { AppError } from '../lib/errors';
 
+type BookingRpcData = {
+  id: string;
+  resourceId: string;
+  requesterId: string;
+  startTime: string;
+  endTime: string;
+  purpose: string;
+  status: string;
+  createdAt: string;
+};
+
+type BookingRpcEnvelope = {
+  success: boolean;
+  code: string;
+  message: string;
+  data: BookingRpcData | null;
+};
+
+type RpcResult = {
+  data: unknown;
+  error: { message: string } | null;
+};
+
+type DbRecord = Record<string, unknown>;
+
+const BOOKING_RPC_NAMES = [
+  'request_booking',
+  'review_booking',
+  'cancel_booking',
+  'check_in_booking',
+  'return_booking',
+] as const;
+
+type BookingRpcName = (typeof BOOKING_RPC_NAMES)[number];
+
+const isRecord = (value: unknown): value is DbRecord =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+const asString = (value: unknown, fallback = ''): string =>
+  typeof value === 'string' ? value : fallback;
+
+const nullableString = (value: unknown): string | undefined =>
+  typeof value === 'string' && value.length > 0 ? value : undefined;
+
+const asRecords = (value: unknown): DbRecord[] => {
+  if (Array.isArray(value)) {
+    return value.filter(isRecord);
+  }
+
+  return isRecord(value) ? [value] : [];
+};
+
+const mapRpcError = (code: string, message: string): AppError => {
+  switch (code) {
+    case 'UNAUTHENTICATED':
+      return new AppError('AUTH_REQUIRED', message);
+    case 'NOT_AUTHORISED':
+      return new AppError('NOT_AUTHORIZED', message);
+    case 'RESOURCE_UNAVAILABLE':
+      return new AppError('RESOURCE_UNAVAILABLE', message);
+    case 'INELIGIBLE':
+      return new AppError('ELIGIBILITY_FAILED', message);
+    case 'INVALID_TIME_RANGE':
+      return new AppError('INVALID_TIME_RANGE', message);
+    case 'BOOKING_CONFLICT':
+      return new AppError('BOOKING_CONFLICT', message);
+    case 'INVALID_STATUS_TRANSITION':
+      return new AppError('INVALID_STATUS_TRANSITION', message);
+    default:
+      return new AppError('NETWORK_FAILURE', `${code}: ${message}`);
+  }
+};
+
+const parseBookingRpcResponse = (
+  data: unknown,
+  rpcName: BookingRpcName,
+): BookingRpcData => {
+  if (!isRecord(data)) {
+    throw new AppError(
+      'NETWORK_FAILURE',
+      `Invalid response received from ${rpcName}.`,
+    );
+  }
+
+  if (
+    typeof data.success !== 'boolean' ||
+    typeof data.code !== 'string' ||
+    typeof data.message !== 'string' ||
+    !('data' in data)
+  ) {
+    throw new AppError(
+      'NETWORK_FAILURE',
+      `The ${rpcName} response has an invalid format.`,
+    );
+  }
+
+  const envelope = data as unknown as BookingRpcEnvelope;
+
+  if (!envelope.success) {
+    throw mapRpcError(envelope.code, envelope.message);
+  }
+
+  const result = envelope.data;
+
+  if (
+    !result ||
+    typeof result.id !== 'string' ||
+    typeof result.resourceId !== 'string' ||
+    typeof result.requesterId !== 'string' ||
+    typeof result.startTime !== 'string' ||
+    typeof result.endTime !== 'string' ||
+    typeof result.purpose !== 'string' ||
+    typeof result.status !== 'string' ||
+    typeof result.createdAt !== 'string'
+  ) {
+    throw new AppError(
+      'NETWORK_FAILURE',
+      `The ${rpcName} response did not contain valid booking data.`,
+    );
+  }
+
+  return result;
+};
+
+const callBookingRpc = async (
+  rpcName: BookingRpcName,
+  args: Record<string, unknown>,
+): Promise<BookingRpcData> => {
+  const client = getSupabaseClient();
+
+  if (!client) {
+    throw new AppError('MISSING_CONFIG');
+  }
+
+  const rpcClient = client as unknown as {
+    rpc: (
+      name: string,
+      parameters: Record<string, unknown>,
+    ) => Promise<RpcResult>;
+  };
+
+  const { data, error } = await rpcClient.rpc(rpcName, args);
+
+  if (error) {
+    throw new AppError('NETWORK_FAILURE', error.message);
+  }
+
+  return parseBookingRpcResponse(data, rpcName);
+};
+
+const mapResource = (value: unknown): Resource | undefined => {
+  if (!isRecord(value) || typeof value.id !== 'string') {
+    return undefined;
+  }
+
+  const status = asString(value.status);
+
+  const imagePath = nullableString(value.image_path);
+  const imageUrl =
+    imagePath && /^https?:\/\//i.test(imagePath)
+      ? imagePath
+      : undefined;
+
+  const requiredTraining = nullableString(value.required_training);
+  const usageRules = nullableString(value.usage_rules);
+  const maxBookingMinutes = value.max_booking_minutes;
+
+  const specifications: Record<string, string> = {};
+
+  if (usageRules) {
+    specifications.usageRules = usageRules;
+  }
+
+  if (requiredTraining) {
+    specifications.requiredTraining = requiredTraining;
+  }
+
+  if (typeof maxBookingMinutes === 'number') {
+    specifications.maxBookingMinutes = String(maxBookingMinutes);
+  }
+
+  return {
+    id: value.id,
+    title: asString(value.name, 'Untitled resource'),
+    description: asString(value.description),
+    category: asString(value.category) as ResourceCategory,
+    location: asString(value.location),
+    ownerId: asString(value.owner_id),
+    ...(imageUrl ? { imageUrl } : {}),
+    availability: {
+      isAvailable: status === 'active',
+    },
+    ...(requiredTraining
+      ? { eligibilityRequirements: [requiredTraining] }
+      : {}),
+    ...(Object.keys(specifications).length > 0
+      ? { specifications }
+      : {}),
+    createdAt: asString(value.created_at) || undefined,
+  };
+};
+
+const mapConditionReport = (
+  value: unknown,
+): ConditionReport | undefined => {
+  if (
+    !isRecord(value) ||
+    typeof value.id !== 'string' ||
+    typeof value.booking_id !== 'string' ||
+    typeof value.reporter_id !== 'string'
+  ) {
+    return undefined;
+  }
+
+  const reportType = value.report_type;
+
+  if (reportType !== 'initial' && reportType !== 'final') {
+    return undefined;
+  }
+
+  return {
+    id: value.id,
+    bookingId: value.booking_id,
+    resourceId: '',
+    inspectorId: value.reporter_id,
+    stage: reportType === 'initial' ? 'checkout' : 'return',
+    notes: asString(value.notes),
+    createdAt: asString(value.created_at),
+  };
+};
+
+const mapBooking = (value: unknown): Booking => {
+  if (!isRecord(value) || typeof value.id !== 'string') {
+    throw new AppError(
+      'NETWORK_FAILURE',
+      'The database returned an invalid booking record.',
+    );
+  }
+
+  const status = asString(value.status);
+
+  const validStatuses: BookingStatus[] = [
+    'pending',
+    'approved',
+    'rejected',
+    'waitlisted',
+    'checked_out',
+    'returned',
+    'cancelled',
+    'overdue',
+  ];
+
+  if (!validStatuses.includes(status as BookingStatus)) {
+    throw new AppError(
+      'NETWORK_FAILURE',
+      `Unknown booking status received: ${status || '(empty)'}.`,
+    );
+  }
+
+  const resource = mapResource(value.resource);
+
+  const conditionReports = asRecords(value.condition_reports)
+    .map(mapConditionReport)
+    .filter(
+      (report): report is ConditionReport => report !== undefined,
+    )
+    .map((report) => ({
+      ...report,
+      resourceId: asString(value.resource_id),
+    }));
+
+  return {
+    id: value.id,
+    resourceId: asString(value.resource_id),
+    ...(resource ? { resource } : {}),
+    requesterId: asString(value.requester_id),
+    // The current schema does not expose another user's display name
+    // through the profile's own-row SELECT policy.
+    requesterName: 'Requester',
+    startTime: asString(value.start_time),
+    endTime: asString(value.end_time),
+    status: status as BookingStatus,
+    purposeNotes: asString(value.purpose) || undefined,
+    rejectionReason: nullableString(value.decision_reason),
+    createdAt: asString(value.created_at),
+    updatedAt: asString(value.updated_at, asString(value.created_at)),
+    conditionReports,
+    ...(nullableString(value.checked_in_at)
+      ? { checkedOutAt: asString(value.checked_in_at) }
+      : {}),
+    ...(nullableString(value.returned_at)
+      ? { returnedAt: asString(value.returned_at) }
+      : {}),
+  };
+};
+
+const BOOKING_SELECT =
+  '*, resource:resources(*), condition_reports(*)';
+
 class BookingService {
-  async requestBooking(input: BookingRequestInput, currentUser: User): Promise<Booking> {
+  async requestBooking(
+    input: BookingRequestInput,
+    currentUser: User,
+  ): Promise<Booking> {
     if (isProductionDataMode()) {
-      const client = getSupabaseClient();
-      if (!client) throw new AppError('MISSING_CONFIG');
+      const result = await callBookingRpc('request_booking', {
+        p_resource_id: input.resourceId,
+        p_start_time: input.startTime,
+        p_end_time: input.endTime,
+        p_purpose: input.purposeNotes,
+      });
 
-      const { data, error } = await client
-        .from('bookings')
-        .insert({
-          resource_id: input.resourceId,
-          requester_id: currentUser.id,
-          start_time: input.startTime,
-          end_time: input.endTime,
-          purpose_notes: input.purposeNotes,
-          status: 'pending',
-        })
-        .select()
-        .single();
-
-      if (error) {
-        throw new AppError('BOOKING_CONFLICT', error.message);
-      }
-      return data as Booking;
+      return this.getBookingById(result.id);
     }
 
-    // Mock Adapter
     return mockStore.requestBooking(input, currentUser);
   }
 
@@ -48,14 +341,15 @@ class BookingService {
 
       const { data, error } = await client
         .from('bookings')
-        .select('*, resource:resources(*)')
+        .select(BOOKING_SELECT)
         .eq('requester_id', userId)
         .order('created_at', { ascending: false });
 
       if (error) {
         throw new AppError('NETWORK_FAILURE', error.message);
       }
-      return (data as Booking[]) || [];
+
+      return (data ?? []).map(mapBooking);
     }
 
     return mockStore.listMyBookings(userId);
@@ -68,22 +362,26 @@ class BookingService {
 
       const { data, error } = await client
         .from('bookings')
-        .select('*, resource:resources(*), condition_reports(*)')
+        .select(BOOKING_SELECT)
         .eq('id', bookingId)
         .single();
 
       if (error) {
         throw new AppError('RESOURCE_UNAVAILABLE', error.message);
       }
-      return data as Booking;
+
+      return mapBooking(data);
     }
 
     return mockStore.getBookingById(bookingId);
   }
 
-  async getBookingSummaryStats(userId: string): Promise<BookingSummaryStats> {
+  async getBookingSummaryStats(
+    userId: string,
+  ): Promise<BookingSummaryStats> {
     if (isProductionDataMode()) {
       const bookings = await this.listMyBookings(userId);
+
       return {
         total: bookings.length,
         pending: bookings.filter((b) => b.status === 'pending').length,
@@ -98,23 +396,19 @@ class BookingService {
     return mockStore.getBookingSummaryStats(userId);
   }
 
-  async cancelBooking(bookingId: string, userId: string): Promise<Booking> {
+  async cancelBooking(
+    bookingId: string,
+    userId: string,
+  ): Promise<Booking> {
     if (isProductionDataMode()) {
-      const client = getSupabaseClient();
-      if (!client) throw new AppError('MISSING_CONFIG');
+      // The RPC enforces permissions. Retain userId for caller compatibility.
+      void userId;
 
-      const { data, error } = await client
-        .from('bookings')
-        .update({ status: 'cancelled' })
-        .eq('id', bookingId)
-        .eq('requester_id', userId)
-        .select()
-        .single();
+      const result = await callBookingRpc('cancel_booking', {
+        p_booking_id: bookingId,
+      });
 
-      if (error) {
-        throw new AppError('INVALID_STATUS_TRANSITION', error.message);
-      }
-      return data as Booking;
+      return this.getBookingById(result.id);
     }
 
     return mockStore.cancelBooking(bookingId, userId);
@@ -125,88 +419,82 @@ class BookingService {
       const client = getSupabaseClient();
       if (!client) throw new AppError('MISSING_CONFIG');
 
-      const { data, error } = await client
+      let query = client
         .from('bookings')
-        .select('*, resource:resources(*)')
+        .select('*, resource:resources!inner(*), condition_reports(*)')
         .order('created_at', { ascending: false });
+
+      if (ownerId) {
+        query = query.eq('resource.owner_id', ownerId);
+      }
+
+      const { data, error } = await query;
 
       if (error) {
         throw new AppError('NETWORK_FAILURE', error.message);
       }
-      return (data as Booking[]) || [];
+
+      return (data ?? []).map(mapBooking);
     }
 
     return mockStore.listOwnerRequests(ownerId);
   }
 
-  async reviewBooking(input: BookingReviewInput, reviewer: User): Promise<Booking> {
+  async reviewBooking(
+    input: BookingReviewInput,
+    reviewer: User,
+  ): Promise<Booking> {
     if (isProductionDataMode()) {
-      const client = getSupabaseClient();
-      if (!client) throw new AppError('MISSING_CONFIG');
+      // Authorization is enforced by the database RPC, not this argument.
+      void reviewer;
 
-      const newStatus = input.decision === 'approve' ? 'approved' : 'rejected';
-      const { data, error } = await client
-        .from('bookings')
-        .update({
-          status: newStatus,
-          rejection_reason: input.rejectionReason,
-        })
-        .eq('id', input.bookingId)
-        .select()
-        .single();
+      const result = await callBookingRpc('review_booking', {
+        p_booking_id: input.bookingId,
+        p_decision: input.decision,
+        p_reason: input.rejectionReason ?? null,
+      });
 
-      if (error) {
-        throw new AppError('INVALID_STATUS_TRANSITION', error.message);
-      }
-      return data as Booking;
+      return this.getBookingById(result.id);
     }
 
     return mockStore.reviewBooking(input, reviewer);
   }
 
-  async checkOutBooking(input: CheckoutInput, inspector: User): Promise<Booking> {
+  async checkOutBooking(
+    input: CheckoutInput,
+    inspector: User,
+  ): Promise<Booking> {
     if (isProductionDataMode()) {
-      const client = getSupabaseClient();
-      if (!client) throw new AppError('MISSING_CONFIG');
+      // The RPC creates the initial condition report. Grades are not stored.
+      void inspector;
+      void input.grade;
 
-      const { data, error } = await client
-        .from('bookings')
-        .update({
-          status: 'checked_out',
-          checked_out_at: new Date().toISOString(),
-        })
-        .eq('id', input.bookingId)
-        .select()
-        .single();
+      const result = await callBookingRpc('check_in_booking', {
+        p_booking_id: input.bookingId,
+        p_initial_condition_notes: input.notes || null,
+      });
 
-      if (error) {
-        throw new AppError('INVALID_STATUS_TRANSITION', error.message);
-      }
-      return data as Booking;
+      return this.getBookingById(result.id);
     }
 
     return mockStore.checkOutBooking(input, inspector);
   }
 
-  async returnBooking(input: ReturnInput, inspector: User): Promise<Booking> {
+  async returnBooking(
+    input: ReturnInput,
+    inspector: User,
+  ): Promise<Booking> {
     if (isProductionDataMode()) {
-      const client = getSupabaseClient();
-      if (!client) throw new AppError('MISSING_CONFIG');
+      // The RPC creates the final condition report. Grades are not stored.
+      void inspector;
+      void input.grade;
 
-      const { data, error } = await client
-        .from('bookings')
-        .update({
-          status: 'returned',
-          returned_at: new Date().toISOString(),
-        })
-        .eq('id', input.bookingId)
-        .select()
-        .single();
+      const result = await callBookingRpc('return_booking', {
+        p_booking_id: input.bookingId,
+        p_final_condition_notes: input.notes || null,
+      });
 
-      if (error) {
-        throw new AppError('INVALID_STATUS_TRANSITION', error.message);
-      }
-      return data as Booking;
+      return this.getBookingById(result.id);
     }
 
     return mockStore.returnBooking(input, inspector);
