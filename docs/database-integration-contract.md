@@ -234,10 +234,27 @@ For the MVP, resource creation is intentionally self-service: any authenticated 
 
 ## 5. Test Scripts & Verification Harness
 
-`supabase/tests/booking_rpcs_test.sql` completed in the fresh disposable local database `sharewise_predeploy_verify_20261029_1_db`. Tests 1–11, 7A–7C, and 13 reported `Passed`; Test 12 reported `NOT RUN` because the DO-block suite cannot change to a real authenticated role. The revised suite ended with `ROLLBACK`. Test 7C verifies that approval returns `RESOURCE_UNAVAILABLE` and leaves the booking pending after the resource enters maintenance.
+The audit records an earlier revision of `supabase/tests/booking_rpcs_test.sql` run in the fresh disposable local database `sharewise_predeploy_verify_20261029_1_db`. Tests 1–11, 7A–7C, and 13 reported `Passed`; Test 12 reported `NOT RUN` because the DO-block suite cannot change to a real authenticated role. That revision ended with `ROLLBACK`. Test 7C verifies that approval returns `RESOURCE_UNAVAILABLE` and leaves the booking pending after the resource enters maintenance. The trigger and per-RPC authorization checks added afterward have not been executed.
 
-`supabase/tests/booking_time_permissions_authenticated.sql` passed in the fresh disposable local database `sharewise_predeploy_verify_20261029_1_db` using `SET LOCAL ROLE authenticated`. The updated script checks that no INSERT-capable condition-report policy or table INSERT privilege exists, attempts a valid direct INSERT and requires SQLSTATE `42501`, and verifies direct updates to booking `start_time` and `end_time` raise `42501` rather than merely affecting zero rows. It also tests own-row and resource-owner RLS behavior, then resets the role and rolls back.
+The audit records an earlier revision of `supabase/tests/booking_time_permissions_authenticated.sql` passing in the fresh disposable local database `sharewise_predeploy_verify_20261029_1_db` using `SET LOCAL ROLE authenticated`. That revision checked that no INSERT-capable condition-report policy or table INSERT privilege exists, attempted a valid direct INSERT and required SQLSTATE `42501`, and verified direct updates to booking `start_time` and `end_time` raised `42501` rather than merely affecting zero rows. It also tested own-row and resource-owner RLS behavior, then reset the role and rolled back. The lifecycle-column assertions added afterward have not been executed.
 
 `supabase/tests/concurrent_booking_tests.sql` documents four two-session scenarios: booking/booking requests, overlapping approvals, booking wins against block creation, and block wins against booking. All four were run and passed in the separate disposable local database `sharewise_concurrency_test_db`; guarded cleanup was verified. The audit records the outcomes as summaries; raw session transcripts are not saved in the repository. The existing `sharewise_test_db` and its colliding fixtures were preserved. Setup and successful scenario effects commit; use a fresh disposable local database or validate and run the guarded cleanup manually before reuse.
 
 See `docs/database-final-integration-audit.md` for commands run, output-based results, working-tree status, and next steps. Do not reset the existing database or reapply migrations blindly. To run the concurrency protocol without disturbing current fixtures, create a separate disposable local database, run the bootstrap and migrations there in order, and use two independent psql sessions. No reset or migration command should target shared Supabase.
+
+### Additional booking security regression tests
+
+The following added checks are intended for a fresh disposable local database after the local bootstrap and migrations 001–003 have been applied. Replace the example database name with that disposable database. These additions have not been runtime-verified; no pass result is claimed here.
+
+```powershell
+$testDb = "sharewise_security_test_db"
+Get-Content -Raw .\supabase\tests\booking_rpcs_test.sql | docker exec -i sharewise-postgres-test psql -X -U sharewise_test -d $testDb -v ON_ERROR_STOP=1
+Get-Content -Raw .\supabase\tests\booking_time_permissions_authenticated.sql | docker exec -i sharewise-postgres-test psql -X -U sharewise_test -d $testDb -v ON_ERROR_STOP=1
+Get-Content -Raw .\supabase\tests\booking_transition_flag_scope.sql | docker exec -i sharewise-postgres-test psql -X -U sharewise_test -d $testDb -v ON_ERROR_STOP=1
+```
+
+`booking_rpcs_test.sql` uses the privileged local fixture harness to require trigger rejection when `sharewise.authorized_booking_transition` is absent and false. The absent-flag case requires a fresh `psql` session with no role-level or database-level default for this setting; otherwise it fails its precondition. Before each successful approval, check-in, return, and cancellation RPC, it sets the flag false and asserts that the RPC sets it true. The script retains its outer transaction and final rollback.
+
+`booking_time_permissions_authenticated.sql` uses a real `SET LOCAL ROLE authenticated` session, verifies that UPDATE privileges are absent for booking time and lifecycle fields, and requires each direct UPDATE to raise SQLSTATE `42501`. Its fixture booking exists and is visible to the requester, and a distinct sentinel error makes a successful or zero-row update fail the test rather than count as permission denial.
+
+`booking_transition_flag_scope.sql` must run in one persistent `psql` process/session. It sets a session-level false baseline, checks the transaction-local true value inside a transaction, then verifies the baseline returns after both `COMMIT` and `ROLLBACK`. It modifies no application tables and resets the session setting before exit.

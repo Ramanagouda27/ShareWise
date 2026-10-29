@@ -20,9 +20,11 @@
 -- Tests 1-11, 7A, 7B, and 13 passed; Test 12 was intentionally NOT RUN in this DO
 -- block because it cannot assume the authenticated role. The separate
 -- booking_time_permissions_authenticated.sql test covers that permission check.
--- Test 7C was added after that run and is a regression test for resource status
--- changing to maintenance after request creation. It has NOT YET BEEN EXECUTED;
--- run this revised suite only in a disposable local database before sign-off.
+-- Test 7C was added after that earlier run. The audit records a later execution
+-- of the Test 7C revision in sharewise_predeploy_verify_20261029_1_db: Test 7C
+-- reported Passed and the suite ended with ROLLBACK. The trigger and per-RPC
+-- authorization checks added afterward have NOT BEEN EXECUTED. Test 12 remains
+-- NOT RUN. See docs/database-final-integration-audit.md for recorded results.
 -- ==============================================================================
 
 BEGIN;
@@ -51,6 +53,9 @@ DECLARE
     v_booking_start_time TIMESTAMPTZ;
     v_booking_end_time TIMESTAMPTZ;
     v_block_rejected BOOLEAN;
+    v_transition_rejected BOOLEAN;
+    v_update_rows INT;
+    v_transition_message TEXT;
 BEGIN
     RAISE NOTICE '=============================================================';
     RAISE NOTICE 'Starting ShareWise Booking RPC Test Suite (Isolated Harness)';
@@ -123,6 +128,61 @@ BEGIN
     ASSERT (v_res->'data'->>'requesterId') = v_requester_id::text, 'Test 2 Failed: Requester ID mismatch';
     RAISE NOTICE 'Test 2 Passed: Booking successfully created in pending status.';
 
+    -- ======================================================================
+    -- TEST 2A: Lifecycle trigger rejects a direct update with the flag absent
+    -- The suite connection must be the privileged local harness role so this
+    -- reaches the trigger instead of failing first on authenticated ACLs.
+    -- ======================================================================
+    IF pg_catalog.current_setting('sharewise.authorized_booking_transition', true) IS NOT NULL THEN
+        RAISE EXCEPTION 'Test 2A requires the lifecycle authorization flag to be absent at suite start.';
+    END IF;
+    ASSERT pg_catalog.has_column_privilege(
+        current_user, 'public.bookings', 'status', 'UPDATE'
+    ), 'Test 2A requires the privileged local test harness role to UPDATE bookings.status.';
+
+    v_transition_rejected := false;
+    BEGIN
+        UPDATE public.bookings SET status = 'cancelled' WHERE id = v_booking_id;
+        GET DIAGNOSTICS v_update_rows = ROW_COUNT;
+        RAISE EXCEPTION 'Test 2A expected trigger rejection; UPDATE affected % rows.', v_update_rows
+            USING ERRCODE = 'P0002';
+    EXCEPTION WHEN SQLSTATE 'P0001' THEN
+        GET STACKED DIAGNOSTICS v_transition_message = MESSAGE_TEXT;
+        IF v_transition_message IS DISTINCT FROM
+           'Direct client updates to booking status are restricted. Use authorized booking actions.' THEN
+            RAISE EXCEPTION 'Test 2A received unexpected P0001 trigger message: %', v_transition_message
+                USING ERRCODE = 'P0002';
+        END IF;
+        v_transition_rejected := true;
+    END;
+    ASSERT v_transition_rejected, 'Test 2A Failed: trigger did not reject status UPDATE with the flag absent.';
+    ASSERT (SELECT status FROM public.bookings WHERE id = v_booking_id) = 'pending',
+        'Test 2A Failed: booking changed after absent-flag rejection.';
+
+    -- ======================================================================
+    -- TEST 2B: Lifecycle trigger rejects a direct update when flag is false
+    -- ======================================================================
+    PERFORM pg_catalog.set_config('sharewise.authorized_booking_transition', 'false', true);
+    v_transition_rejected := false;
+    BEGIN
+        UPDATE public.bookings SET status = 'cancelled' WHERE id = v_booking_id;
+        GET DIAGNOSTICS v_update_rows = ROW_COUNT;
+        RAISE EXCEPTION 'Test 2B expected trigger rejection; UPDATE affected % rows.', v_update_rows
+            USING ERRCODE = 'P0002';
+    EXCEPTION WHEN SQLSTATE 'P0001' THEN
+        GET STACKED DIAGNOSTICS v_transition_message = MESSAGE_TEXT;
+        IF v_transition_message IS DISTINCT FROM
+           'Direct client updates to booking status are restricted. Use authorized booking actions.' THEN
+            RAISE EXCEPTION 'Test 2B received unexpected P0001 trigger message: %', v_transition_message
+                USING ERRCODE = 'P0002';
+        END IF;
+        v_transition_rejected := true;
+    END;
+    ASSERT v_transition_rejected, 'Test 2B Failed: trigger did not reject status UPDATE when the flag was false.';
+    ASSERT (SELECT status FROM public.bookings WHERE id = v_booking_id) = 'pending',
+        'Test 2B Failed: booking changed after false-flag rejection.';
+    RAISE NOTICE 'Tests 2A-2B Passed: lifecycle trigger rejected direct status updates with absent and false authorization flags.';
+
     -- ==========================================================================
     -- TEST 3: Overlapping booking conflict detection (BOOKING_CONFLICT)
     -- ==========================================================================
@@ -178,10 +238,13 @@ BEGIN
     -- Also verifies Fix 3: audit metadata records correct previous_status and new_status
     -- ==========================================================================
     PERFORM pg_catalog.set_config('request.jwt.claim.sub', v_owner_id::text, true);
+    PERFORM pg_catalog.set_config('sharewise.authorized_booking_transition', 'false', true);
     v_res := public.review_booking(v_booking_id, 'approve', 'Approved by lab manager');
     ASSERT (v_res->>'success')::boolean = true, 'Test 7 Failed: Owner approval should succeed';
     ASSERT (v_res->>'code') = 'OK', 'Test 7 Failed: Expected OK code';
     ASSERT (v_res->'data'->>'status') = 'approved', 'Test 7 Failed: Status should be approved';
+    ASSERT pg_catalog.current_setting('sharewise.authorized_booking_transition', true) = 'true',
+        'Test 7 Failed: review_booking did not set the authorization flag.';
 
     -- Verify audit metadata correctly captures previous and new status (Fix 3)
     SELECT
@@ -307,10 +370,13 @@ BEGIN
     -- TEST 8: Check-in / Checkout transition and initial condition report
     -- ==========================================================================
     PERFORM pg_catalog.set_config('request.jwt.claim.sub', v_requester_id::text, true);
+    PERFORM pg_catalog.set_config('sharewise.authorized_booking_transition', 'false', true);
     v_res := public.check_in_booking(v_booking_id, 'Lenses clean, laser functional.');
     ASSERT (v_res->>'success')::boolean = true, 'Test 8 Failed: Check-in should succeed';
     ASSERT (v_res->>'code') = 'OK', 'Test 8 Failed: Expected OK code';
     ASSERT (v_res->'data'->>'status') = 'checked_out', 'Test 8 Failed: Status should be checked_out';
+    ASSERT pg_catalog.current_setting('sharewise.authorized_booking_transition', true) = 'true',
+        'Test 8 Failed: check_in_booking did not set the authorization flag.';
 
     -- Verify condition report was created
     SELECT count(*) INTO v_report_count
@@ -322,10 +388,13 @@ BEGIN
     -- ==========================================================================
     -- TEST 9: Return booking transition and final condition report
     -- ==========================================================================
+    PERFORM pg_catalog.set_config('sharewise.authorized_booking_transition', 'false', true);
     v_res := public.return_booking(v_booking_id, 'Returned wiped down and power off.');
     ASSERT (v_res->>'success')::boolean = true, 'Test 9 Failed: Return should succeed';
     ASSERT (v_res->>'code') = 'OK', 'Test 9 Failed: Expected OK code';
     ASSERT (v_res->'data'->>'status') = 'returned', 'Test 9 Failed: Status should be returned';
+    ASSERT pg_catalog.current_setting('sharewise.authorized_booking_transition', true) = 'true',
+        'Test 9 Failed: return_booking did not set the authorization flag.';
 
     SELECT count(*) INTO v_report_count
     FROM public.condition_reports
@@ -351,10 +420,13 @@ BEGIN
     v_booking_id := (v_res->'data'->>'id')::UUID;
 
     -- Requester cancels their own booking
+    PERFORM pg_catalog.set_config('sharewise.authorized_booking_transition', 'false', true);
     v_cancel_res := public.cancel_booking(v_booking_id);
     ASSERT (v_cancel_res->>'success')::boolean = true, 'Test 11 Failed: Cancellation should succeed';
     ASSERT (v_cancel_res->>'code') = 'OK', 'Test 11 Failed: Expected OK code';
     ASSERT (v_cancel_res->'data'->>'status') = 'cancelled', 'Test 11 Failed: Status should be cancelled';
+    ASSERT pg_catalog.current_setting('sharewise.authorized_booking_transition', true) = 'true',
+        'Test 11 Failed: cancel_booking did not set the authorization flag.';
     RAISE NOTICE 'Test 11 Passed: Dedicated cancellation succeeded.';
 
     -- Verify transactional audit events exist
