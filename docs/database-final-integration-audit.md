@@ -126,3 +126,26 @@ Get-Content -Raw .\supabase\tests\booking_time_permissions_authenticated.sql | d
 Observed output included `SET`, `DO`, and `PASS: authenticated direct INSERT into condition_reports and UPDATE of booking start_time/end_time were privilege-denied; RLS own/other-row controls also behaved as expected.`, then `RESET` and `ROLLBACK`. Exit status: **0**. The script checks that `authenticated` has no table INSERT privilege, that no INSERT/ALL RLS policy exists on `condition_reports`, and that the direct fixture-backed INSERT raises `42501`; successful insertion or a non-42501 error fails the block. Fixture writes and the attempted insert were rolled back.
 
 The final ZIP was refreshed after this update and the corrected test pass. Concurrency outcomes remain recorded in the earlier audit section as summaries only; raw two-session transcripts are not saved. The existing concurrency database and its fixture state were not touched during this correction. Shared Supabase was not accessed or deployed to.
+
+## Security regression test verification (2026-10-29)
+
+A fresh, isolated disposable database `sharewise_security_run_20261029_db` was created in local Docker PostgreSQL (`sharewise-postgres-test`). Prior databases (`sharewise_test_db`, `sharewise_concurrency_test_db`, etc.) were preserved untouched.
+
+1. **Bootstrap & Migrations Applied**:
+   - `supabase/tests/local_test_bootstrap.sql`
+   - `supabase/migrations/202610280001_profiles.sql`
+   - `supabase/migrations/202610280002_sharewise_core_tables.sql`
+   - `supabase/migrations/202610280003_booking_rpcs.sql`
+   All applied in documented order with `ON_ERROR_STOP=1` and exited with status 0.
+
+2. **Functional RPC & Trigger Test (`booking_rpcs_test.sql`)**:
+   - Run in a fresh `psql` session with no session/role default for `sharewise.authorized_booking_transition`.
+   - Results: Test 1, Test 2, Tests 2A–2B (trigger rejection on absent and false flag), Tests 3–11, 7A–7C, and 13 all **Passed**. Test 12 was reported as `NOT RUN` by design. Final transaction rolled back cleanly. Exit status: 0.
+
+3. **Authenticated Permission Test (`booking_time_permissions_authenticated.sql`)**:
+   - Executed under `SET LOCAL ROLE authenticated`.
+   - Results: Direct `INSERT` into `condition_reports` and direct `UPDATE` attempts on `start_time`, `end_time`, `status`, `decision_by`, `decision_at`, `decision_reason`, `checked_in_at`, and `returned_at` all raised SQLSTATE `42501` (privilege denied), successfully distinguishing SQL permissions from RLS zero-row outcomes. RLS own-row/other-row controls behaved as expected. Final transaction rolled back cleanly. Exit status: 0.
+
+4. **Transaction-Local Flag Scope Test (`booking_transition_flag_scope.sql`)**:
+   - Executed in a single persistent `psql` session.
+   - Results: Verified that `sharewise.authorized_booking_transition` reverted to session `false` baseline after both `COMMIT` and `ROLLBACK`. Exit status: 0.

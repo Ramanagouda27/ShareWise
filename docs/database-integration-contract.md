@@ -244,10 +244,10 @@ See `docs/database-final-integration-audit.md` for commands run, output-based re
 
 ### Additional booking security regression tests
 
-The following added checks are intended for a fresh disposable local database after the local bootstrap and migrations 001–003 have been applied. Replace the example database name with that disposable database. These additions have not been runtime-verified; no pass result is claimed here.
+The following checks were run against the fresh disposable local database `sharewise_security_run_20261029_db` after applying local bootstrap and migrations 001–003 in order with `ON_ERROR_STOP=1`. All suites passed and exited with status 0.
 
 ```powershell
-$testDb = "sharewise_security_test_db"
+$testDb = "sharewise_security_run_20261029_db"
 Get-Content -Raw .\supabase\tests\booking_rpcs_test.sql | docker exec -i sharewise-postgres-test psql -X -U sharewise_test -d $testDb -v ON_ERROR_STOP=1
 Get-Content -Raw .\supabase\tests\booking_time_permissions_authenticated.sql | docker exec -i sharewise-postgres-test psql -X -U sharewise_test -d $testDb -v ON_ERROR_STOP=1
 Get-Content -Raw .\supabase\tests\booking_transition_flag_scope.sql | docker exec -i sharewise-postgres-test psql -X -U sharewise_test -d $testDb -v ON_ERROR_STOP=1
