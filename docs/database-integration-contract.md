@@ -28,7 +28,7 @@ All primary keys use `pg_catalog.gen_random_uuid()` (`UUID`). All timestamps are
 * `max_booking_minutes` (`INT4`, `> 0`)
 * `status` (`TEXT`, CHECK: `'active'`, `'inactive'`, `'maintenance'`)
 * `created_at`, `updated_at` (`TIMESTAMPTZ`)
-* *RLS*: `SELECT` for active resources or owner; `INSERT`, `UPDATE` for owner.
+* *Grants & RLS*: `SELECT` granted to `authenticated` (view active or owned resources) and `anon` (restricted by policy "Anonymous users can view active resources" strictly to `status = 'active'`; maintenance and inactive resources are hidden). `INSERT`, `UPDATE` for resource owner (`authenticated`).
 
 ### 1.3 `public.availability_blocks`
 * `id` (`UUID`, PK)
@@ -100,7 +100,7 @@ All RPCs are defined with `SECURITY DEFINER` and `SET search_path = ''`. They re
   "success": false,
   "code": "UNAUTHENTICATED" | "NOT_AUTHORISED" | "RESOURCE_UNAVAILABLE" |
           "INELIGIBLE" | "INVALID_TIME_RANGE" | "BOOKING_CONFLICT" |
-          "INVALID_STATUS_TRANSITION",
+          "INVALID_STATUS_TRANSITION" | "INVALID_INPUT",
   "message": "...",
   "data": null
 }
@@ -118,14 +118,15 @@ All RPCs are defined with `SECURITY DEFINER` and `SET search_path = ''`. They re
   ```
 * **Authorization**: Authenticated user (`auth.uid()`).
 * **Validation & Concurrency**:
-  1. Checks non-empty purpose and `p_start_time < p_end_time` and `p_start_time > now()`.
-  2. Acquires row lock `SELECT * FROM public.resources WHERE id = p_resource_id FOR UPDATE` to serialize concurrent requests.
-  3. Verifies `resource.status = 'active'`.
-  4. Enforces `max_booking_minutes` if configured.
-  5. Checks `public.availability_blocks` for overlapping active blocks (`requested_start < block.end_time AND block.start_time < requested_end`). If found, returns `RESOURCE_UNAVAILABLE`.
-  6. If `resource.required_training` is set, verifies caller has active verified `eligibility_records`.
-  7. Confirms no overlapping bookings exist in status `('pending', 'approved', 'checked_out', 'overdue')`.
-  8. Inserts booking in `'pending'` status and records transactional audit event.
+  1. Checks non-empty purpose, `p_start_time < p_end_time`, and `p_start_time > now()`.
+  2. Enforces a 30-minute minimum booking duration (`IF p_end_time - p_start_time < INTERVAL '30 minutes'`). Callers requesting a duration shorter than 30 minutes receive `success: false`, `code: "INVALID_TIME_RANGE"`, `message: "Booking duration must be at least 30 minutes."`, and `data: null`. No booking row is created.
+  3. Acquires row lock `SELECT * FROM public.resources WHERE id = p_resource_id FOR UPDATE` to serialize concurrent requests.
+  4. Verifies `resource.status = 'active'`.
+  5. Enforces `max_booking_minutes` if configured.
+  6. Checks `public.availability_blocks` for overlapping active blocks (`requested_start < block.end_time AND block.start_time < requested_end`). If found, returns `RESOURCE_UNAVAILABLE`.
+  7. If `resource.required_training` is set, verifies caller has active verified `eligibility_records`.
+  8. Confirms no overlapping bookings exist in status `('pending', 'approved', 'checked_out', 'overdue')`.
+  9. Inserts booking in `'pending'` status and records transactional audit event.
 
 ### 2.3 `public.review_booking`
 * **Signature**:
@@ -137,6 +138,10 @@ All RPCs are defined with `SECURITY DEFINER` and `SET search_path = ''`. They re
   ) RETURNS JSONB
   ```
 * **Authorization**: Resource owner only (`resource.owner_id = auth.uid()`).
+* **Validation & Input Guarding**:
+  - Validates decision verb (`approve`, `reject`, `waitlist`).
+  - When `p_decision = 'reject'`, requires a non-empty rejection reason (`pg_catalog.btrim(COALESCE(p_reason, '')) != ''`). If `p_reason` is null, empty, or whitespace-only, returns `success: false`, `code: "INVALID_INPUT"`, `message: "A rejection reason is required."`, and `data: null`. The booking remains in `pending` status.
+  - When a valid rejection reason is supplied, the booking transitions to `rejected` and the reason text is persisted into `bookings.decision_reason`.
 * **Concurrency & Locking**:
   - Reads the booking to identify its parent, then locks the parent resource before locking the booking row.
   - The parent resource is the shared transaction lock used by booking requests, lifecycle transitions, and availability-block writes.
@@ -224,37 +229,68 @@ For the MVP, resource creation is intentionally self-service: any authenticated 
 
 ## 4. Migration Status & Safety Verification
 
-* **Local test database**: On 2026-10-29, read-only catalog inspection confirmed PostgreSQL 16.15, all eight core/profile tables with RLS enabled, all five booking RPC signatures, and `guard_availability_block_booking_conflict()` with its availability-block trigger. The current RPC owner is `sharewise_test`.
-* **Role and ACL check**: Local `authenticated` is `NOLOGIN`, `NOSUPERUSER`, and `NOBYPASSRLS`. It has `UPDATE` on `bookings.purpose`, but not `start_time` or `end_time`.
-* **Migration 001 shared status**: Historical repository metadata records this migration as applied to shared Supabase. That state was not independently verified during this audit.
-* **Migrations 001–003**: They were not reapplied in-place to an existing database. The bootstrap and all three current migration files were applied in order to fresh disposable local databases `sharewise_handoff_verify_db` and, for the corrected final verification, `sharewise_predeploy_verify_20261029_1_db`. No shared deployment was made.
-* **Isolation**: No frontend files were edited. No shared Supabase connection was made.
+* **Local test database**: PostgreSQL 16.15 running in local Docker container `sharewise-postgres-test`.
+* **Role and ACL check**: Local `authenticated` is `NOLOGIN`, `NOSUPERUSER`, and `NOBYPASSRLS`. It has `UPDATE` on `bookings.purpose`, but direct updates to `start_time`, `end_time`, and all lifecycle columns (`status`, `decision_by`, `decision_at`, `decision_reason`, `checked_in_at`, `returned_at`) are revoked. Local `anon` has `SELECT` on `public.resources` strictly scoped to `status = 'active'` rows by RLS.
+* **Migration 001 shared status**: Confirmed present in live Supabase SQL Editor / dashboard, but not baselined in `supabase_migrations.schema_migrations`.
+* **Migrations 001–003**: The bootstrap and all three migration files applied in order with `ON_ERROR_STOP=1` (all exit code 0) to fresh disposable local database `sharewise_member3_verify_db` on 2026-10-30.
+* **Deployment Blockers**:
+  1. **Full live schema/data backup**: NOT VERIFIED / BLOCKER. Backup automation scripts were reviewed locally for PowerShell syntax and argument safety, but no verified full backup has been executed against or validated from shared Supabase.
+  2. **Migration-ledger baseline**: Migration 001 must be baselined into the CLI tracking table (`supabase migration repair --status applied 202610280001`) before running any remote migrations.
+* **Isolation**: All tests ran locally in disposable Docker PostgreSQL. No remote SQL, `supabase db push`, migration repair, or production seeding was executed against shared Supabase.
 
 ---
 
 ## 5. Test Scripts & Verification Harness
 
-The audit records an earlier revision of `supabase/tests/booking_rpcs_test.sql` run in the fresh disposable local database `sharewise_predeploy_verify_20261029_1_db`. Tests 1–11, 7A–7C, and 13 reported `Passed`; Test 12 reported `NOT RUN` because the DO-block suite cannot change to a real authenticated role. That revision ended with `ROLLBACK`. Test 7C verifies that approval returns `RESOURCE_UNAVAILABLE` and leaves the booking pending after the resource enters maintenance. The trigger and per-RPC authorization checks added afterward have not been executed.
+### 5.1 Latest Clean-Room Verification (2026-10-30)
 
-The audit records an earlier revision of `supabase/tests/booking_time_permissions_authenticated.sql` passing in the fresh disposable local database `sharewise_predeploy_verify_20261029_1_db` using `SET LOCAL ROLE authenticated`. That revision checked that no INSERT-capable condition-report policy or table INSERT privilege exists, attempted a valid direct INSERT and required SQLSTATE `42501`, and verified direct updates to booking `start_time` and `end_time` raised `42501` rather than merely affecting zero rows. It also tested own-row and resource-owner RLS behavior, then reset the role and rolled back. The lifecycle-column assertions added afterward have not been executed.
+The bootstrap and migrations 001–003 were applied in order with `ON_ERROR_STOP=1` to fresh disposable local database `sharewise_member3_verify_db`:
 
-`supabase/tests/concurrent_booking_tests.sql` documents four two-session scenarios: booking/booking requests, overlapping approvals, booking wins against block creation, and block wins against booking. All four were run and passed in the separate disposable local database `sharewise_concurrency_test_db`; guarded cleanup was verified. The audit records the outcomes as summaries; raw session transcripts are not saved in the repository. The existing `sharewise_test_db` and its colliding fixtures were preserved. Setup and successful scenario effects commit; use a fresh disposable local database or validate and run the guarded cleanup manually before reuse.
+1. **`supabase/tests/booking_rpcs_test.sql` (Exit code: 0)**:
+   - **Passed (17 of 17 runnable checks)**:
+     - Test 1: Unauthenticated request rejected (`UNAUTHENTICATED`).
+     - Test 2: Booking successfully created in `pending` status.
+     - **Test 2C**: Database enforces 30-minute minimum duration (15-minute booking rejected with `INVALID_TIME_RANGE`, returns null data, no row created in `public.bookings`).
+     - Tests 2A–2B: Lifecycle trigger rejects direct status updates on absent and false authorization flags.
+     - Test 3: Overlapping booking conflict detected and rejected (`BOOKING_CONFLICT`).
+     - Test 4: Active availability block conflict rejected (`RESOURCE_UNAVAILABLE`).
+     - Test 5: Resource eligibility enforced accurately (`INELIGIBLE`).
+     - Test 6: Unauthorized reviewer rejected (`NOT_AUTHORISED`).
+     - Test 7: Owner approved booking; audit event recorded (`previous_status=pending`, `new_status=approved`).
+     - Test 7A: Overlapping availability block INSERT and UPDATE rejected by trigger.
+     - Test 7B: Approval correctly rejected due to active availability block.
+     - Test 7C: Approval rejected because resource entered `maintenance` after request (`RESOURCE_UNAVAILABLE`).
+     - **Test 7D**: Blank/whitespace-only rejection reason rejected with `INVALID_INPUT` (booking remains `pending`); valid reason succeeds, transitions to `rejected`, and persists to `decision_reason`.
+     - Test 8: Check-in transition and initial condition report recorded.
+     - Test 9: Return transition and final condition report recorded.
+     - Test 10: Invalid status transition blocked (`INVALID_STATUS_TRANSITION`).
+     - Test 11: Dedicated cancellation succeeded.
+     - Test 13: 121-minute booking correctly rejected against 120-minute ceiling limit (`INVALID_TIME_RANGE`).
+   - **Deferred (Test 12 NOT RUN)**: Explicitly marked `NOT RUN` by design in the RPC suite because asserting `UPDATE` permission denial on booking time/lifecycle columns requires switching role to `authenticated` outside a single `DO $$` block. Test 12 is fully covered by `booking_time_permissions_authenticated.sql`.
+   - **Teardown**: Script executed `ROLLBACK` (all test data discarded).
 
-See `docs/database-final-integration-audit.md` for commands run, output-based results, working-tree status, and next steps. Do not reset the existing database or reapply migrations blindly. To run the concurrency protocol without disturbing current fixtures, create a separate disposable local database, run the bootstrap and migrations there in order, and use two independent psql sessions. No reset or migration command should target shared Supabase.
+2. **`supabase/tests/booking_time_permissions_authenticated.sql` (Exit code: 0)**:
+   - **Passed**: Under `SET LOCAL ROLE anon`, confirmed anonymous role can select active resources (count = 1) and is denied from selecting maintenance resources (count = 0).
+   - **Passed**: Under `SET LOCAL ROLE authenticated`, confirmed direct `INSERT` into `condition_reports` and direct `UPDATE` of booking time (`start_time`, `end_time`) and lifecycle columns (`status`, `decision_by`, `decision_at`, `decision_reason`, `checked_in_at`, `returned_at`) are denied with SQLSTATE `42501` (privilege denied), distinguishing SQL permissions from RLS zero-row outcomes. RLS own-row and other-row controls also behaved as expected.
+   - **Teardown**: Script executed `ROLLBACK` (all test data discarded).
 
-### Additional booking security regression tests
+3. **Database Tear Down**:
+   - Confirmed row counts across all public tables and `auth.users` were 0 after rollbacks.
+   - `DROP DATABASE sharewise_member3_verify_db;` executed cleanly with exit code 0.
 
-The following checks were run against the fresh disposable local database `sharewise_security_run_20261029_db` after applying local bootstrap and migrations 001–003 in order with `ON_ERROR_STOP=1`. All suites passed and exited with status 0.
+### 5.2 Concurrency Scenarios (`concurrent_booking_tests.sql` — Historical Evidence)
 
-```powershell
-$testDb = "sharewise_security_run_20261029_db"
-Get-Content -Raw .\supabase\tests\booking_rpcs_test.sql | docker exec -i sharewise-postgres-test psql -X -U sharewise_test -d $testDb -v ON_ERROR_STOP=1
-Get-Content -Raw .\supabase\tests\booking_time_permissions_authenticated.sql | docker exec -i sharewise-postgres-test psql -X -U sharewise_test -d $testDb -v ON_ERROR_STOP=1
-Get-Content -Raw .\supabase\tests\booking_transition_flag_scope.sql | docker exec -i sharewise-postgres-test psql -X -U sharewise_test -d $testDb -v ON_ERROR_STOP=1
-```
+`supabase/tests/concurrent_booking_tests.sql` documents four interactive two-session scenarios:
+1. Overlapping booking requests (second request waits for first commit, then returns `BOOKING_CONFLICT`).
+2. Concurrent booking approvals (second approval waits for first commit, then returns `BOOKING_CONFLICT`).
+3. Booking wins vs. active block insert (block insert rejected with exception).
+4. Active block wins vs. booking request (booking returns `RESOURCE_UNAVAILABLE`).
 
-`booking_rpcs_test.sql` uses the privileged local fixture harness to require trigger rejection when `sharewise.authorized_booking_transition` is absent and false. The absent-flag case requires a fresh `psql` session with no role-level or database-level default for this setting; otherwise it fails its precondition. Before each successful approval, check-in, return, and cancellation RPC, it sets the flag false and asserts that the RPC sets it true. The script retains its outer transaction and final rollback.
+**Status**:
+- These interactive scenarios **were not rerun** during the 2026-10-30 automated verification.
+- They remain documented as **historical audit evidence** from their successful execution on **2026-10-29** in `sharewise_concurrency_test_db`.
+- Because the protocol requires manual, synchronized interleaving across two interactive terminals (`docker exec -it ...`), raw automated transcripts are not stored in repository logs.
 
-`booking_time_permissions_authenticated.sql` uses a real `SET LOCAL ROLE authenticated` session, verifies that UPDATE privileges are absent for booking time and lifecycle fields, and requires each direct UPDATE to raise SQLSTATE `42501`. Its fixture booking exists and is visible to the requester, and a distinct sentinel error makes a successful or zero-row update fail the test rather than count as permission denial.
+### 5.3 Additional Regression Tests (`booking_transition_flag_scope.sql` — Historical Evidence)
 
-`booking_transition_flag_scope.sql` must run in one persistent `psql` process/session. It sets a session-level false baseline, checks the transaction-local true value inside a transaction, then verifies the baseline returns after both `COMMIT` and `ROLLBACK`. It modifies no application tables and resets the session setting before exit.
+Executed on **2026-10-29** in `sharewise_security_run_20261029_db`: verified in a persistent `psql` session that `sharewise.authorized_booking_transition` reverted to session `false` baseline after both `COMMIT` and `ROLLBACK` (Exit code: 0).
