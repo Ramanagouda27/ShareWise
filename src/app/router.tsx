@@ -9,6 +9,8 @@ import { BookingDetailsPage } from '../pages/BookingDetailsPage';
 import { OwnerRequestsPage } from '../pages/OwnerRequestsPage';
 import { LoginPage } from '../pages/LoginPage';
 import { SignupPage } from '../pages/SignupPage';
+import { ForgotPasswordPage } from '../pages/ForgotPasswordPage';
+import { ResetPasswordPage } from '../pages/ResetPasswordPage';
 import { NotFoundPage } from '../pages/NotFoundPage';
 import { ProtectedRoute } from '../components/auth/ProtectedRoute';
 
@@ -53,6 +55,8 @@ export const AppRouter: React.FC = () => {
         {/* Auth routes */}
         <Route path="/login" element={<LoginPage />} />
         <Route path="/signup" element={<SignupPage />} />
+        <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+        <Route path="/reset-password" element={<ResetPasswordPage />} />
 
         {/* Fallback 404 */}
         <Route path="/404" element={<NotFoundPage />} />

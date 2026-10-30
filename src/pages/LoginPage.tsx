@@ -126,9 +126,9 @@ export const LoginPage: React.FC = () => {
               />
 
               <div className="flex justify-end mt-1.5">
-                <a href="#" className="text-[11px] text-blue-600 hover:underline">
+                <Link to="/forgot-password" className="text-xs text-blue-600 hover:underline">
                   Forgot password?
-                </a>
+                </Link>
               </div>
             </div>
 
