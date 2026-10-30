@@ -110,17 +110,17 @@ function applyResourceFilters(
       if (!wantedCategory || resource.category !== wantedCategory) return false;
     }
 
-    if (location && !resource.location.toLowerCase().includes(location)) {
+    if (
+      location &&
+      !['all', 'any', 'all_locations', 'all_campus_locations'].includes(location) &&
+      !resource.location.toLowerCase().includes(location)
+    ) {
       return false;
     }
 
-    if (
-  location &&
-  !['all', 'any', 'all_locations', 'all_campus_locations'].includes(location) &&
-  !resource.location.toLowerCase().includes(location)
-) {
-  return false;
-}
+    if (filters?.availableOnly && !resource.availability.isAvailable) {
+      return false;
+    }
     return true;
   });
 }
