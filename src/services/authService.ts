@@ -31,9 +31,7 @@ class AuthService {
     return client;
   }
 
-  // Until the backend confirms the trusted profile lookup, live users default
-  // to student in the UI. Do not authorize roles using user-editable metadata.
-  private mapSupabaseUser(authUser: {
+  private mapSupabaseUserFallback(authUser: {
     id: string;
     email?: string;
     user_metadata?: Record<string, unknown>;
@@ -54,6 +52,40 @@ class AuthService {
       department:
         typeof metadata.department === 'string' ? metadata.department : undefined,
     };
+  }
+
+  // Authorization roles come only from the protected public.profiles row.
+  // User-editable auth metadata is never used to grant owner/admin access.
+  private async mapSupabaseUser(authUser: {
+    id: string;
+    email?: string;
+    user_metadata?: Record<string, unknown>;
+  }): Promise<User> {
+    const fallback = this.mapSupabaseUserFallback(authUser);
+
+    try {
+      const client = this.requireSupabaseClient();
+      const { data, error } = await client
+        .from('profiles')
+        .select('display_name, role')
+        .eq('id', authUser.id)
+        .maybeSingle();
+
+      if (error || !data) return fallback;
+
+      const role = data.role === 'owner' || data.role === 'admin'
+        ? data.role
+        : 'student';
+      const fullName =
+        typeof data.display_name === 'string' && data.display_name.trim()
+          ? data.display_name
+          : fallback.fullName;
+
+      return { ...fallback, fullName, role };
+    } catch {
+      // Fail closed: a profile lookup failure never grants elevated access.
+      return fallback;
+    }
   }
 
   private restoreMockSession() {
@@ -97,14 +129,32 @@ class AuthService {
       }
 
       this.currentUser = data.session?.user
-        ? this.mapSupabaseUser(data.session.user)
+        ? await this.mapSupabaseUser(data.session.user)
         : null;
       this.initialized = true;
       this.notify();
 
       const { data: authListener } = client.auth.onAuthStateChange((_event, session) => {
-        this.currentUser = session?.user ? this.mapSupabaseUser(session.user) : null;
-        this.notify();
+        const authUser = session?.user;
+        if (!authUser) {
+          this.currentUser = null;
+          this.notify();
+          return;
+        }
+
+        // Run profile I/O after the auth callback returns to avoid blocking
+        // Supabase's internal auth lock while it emits auth state changes.
+        void Promise.resolve()
+          .then(() => this.mapSupabaseUser(authUser))
+          .then((mappedUser) => {
+            if (!this.currentUser || this.currentUser.id === mappedUser.id) {
+              this.currentUser = mappedUser;
+              this.notify();
+            }
+          })
+          .catch((error) => {
+            console.error('[ShareWise] Could not load the signed-in profile:', error);
+          });
       });
 
       this.supabaseUnsubscribe = () => authListener.subscription.unsubscribe();
@@ -141,7 +191,7 @@ class AuthService {
       if (error) throw new AppError('AUTH_REQUIRED', error.message);
       if (!data.user) throw new AppError('AUTH_REQUIRED', 'No user found.');
 
-      this.currentUser = this.mapSupabaseUser(data.user);
+      this.currentUser = await this.mapSupabaseUser(data.user);
       this.notify();
       return this.currentUser;
     }
@@ -196,7 +246,7 @@ class AuthService {
         throw new AppError('AUTH_REQUIRED', 'Supabase did not return a user for this signup.');
       }
 
-      this.currentUser = data.session ? this.mapSupabaseUser(data.user) : null;
+      this.currentUser = data.session ? await this.mapSupabaseUser(data.user) : null;
       this.notify();
       return this.currentUser;
     }

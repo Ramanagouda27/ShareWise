@@ -13,6 +13,7 @@ import { ForgotPasswordPage } from '../pages/ForgotPasswordPage';
 import { ResetPasswordPage } from '../pages/ResetPasswordPage';
 import { NotFoundPage } from '../pages/NotFoundPage';
 import { ProtectedRoute } from '../components/auth/ProtectedRoute';
+import { isMockAuthMode } from '../services/authService';
 
 export const AppRouter: React.FC = () => {
   return (
@@ -46,7 +47,7 @@ export const AppRouter: React.FC = () => {
         <Route
           path="/owner/requests"
           element={
-            <ProtectedRoute>
+            <ProtectedRoute requiredRole={isMockAuthMode() ? undefined : 'owner'}>
               <OwnerRequestsPage />
             </ProtectedRoute>
           }
