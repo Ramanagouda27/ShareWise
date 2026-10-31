@@ -8,10 +8,11 @@ import {
 } from './rules.ts'
 
 test('rejects an invalid time range', () => {
-  const result = validateTimeRange(
-    '2026-10-30T14:00:00+05:30',
-    '2026-10-30T13:00:00+05:30',
-  )
+  // Keep both timestamps in the future so this test remains deterministic
+  // even when the calendar date changes.
+  const startTime = new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString()
+  const endTime = new Date(Date.now() + 60 * 60 * 1000).toISOString()
+  const result = validateTimeRange(startTime, endTime)
 
   assert.equal(result.valid, false)
   assert.equal(result.error, 'INVALID_TIME_RANGE')

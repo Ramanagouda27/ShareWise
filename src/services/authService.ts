@@ -17,6 +17,7 @@ class AuthService {
   private initialized = false;
   private initializationPromise: Promise<void> | null = null;
   private supabaseUnsubscribe: (() => void) | null = null;
+  private authStateGeneration = 0;
 
   private requireSupabaseClient() {
     if (!isSupabaseConfigured()) {
@@ -135,6 +136,8 @@ class AuthService {
       this.notify();
 
       const { data: authListener } = client.auth.onAuthStateChange((_event, session) => {
+        // Invalidate profile lookups started for any earlier auth event.
+        const generation = ++this.authStateGeneration;
         const authUser = session?.user;
         if (!authUser) {
           this.currentUser = null;
@@ -147,7 +150,12 @@ class AuthService {
         void Promise.resolve()
           .then(() => this.mapSupabaseUser(authUser))
           .then((mappedUser) => {
-            if (!this.currentUser || this.currentUser.id === mappedUser.id) {
+            // A delayed lookup must not restore a session after sign-out or
+            // overwrite a newer session created by a later auth event.
+            if (
+              generation === this.authStateGeneration &&
+              (!this.currentUser || this.currentUser.id === mappedUser.id)
+            ) {
               this.currentUser = mappedUser;
               this.notify();
             }
@@ -293,6 +301,7 @@ class AuthService {
   }
 
   public dispose(): void {
+    this.authStateGeneration += 1;
     this.supabaseUnsubscribe?.();
     this.supabaseUnsubscribe = null;
   }
