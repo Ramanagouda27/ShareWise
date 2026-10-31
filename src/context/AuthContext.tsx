@@ -10,20 +10,29 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   useEffect(() => {
     let active = true;
+    let initialized = false;
 
     const unsubscribe = authService.onAuthStateChange((updatedUser) => {
       if (!active) return;
       setUser(updatedUser);
-      setIsLoading(false);
+      if (initialized) setIsLoading(false);
     });
 
-    void authService.initialize().catch((error) => {
-      console.error('[ShareWise] Failed to initialize authentication:', error);
-      if (active) {
-        setUser(null);
+    void authService.initialize()
+      .then(() => {
+        if (!active) return;
+        initialized = true;
+        setUser(authService.getCurrentUser());
         setIsLoading(false);
-      }
-    });
+      })
+      .catch((error) => {
+        console.error('[ShareWise] Failed to initialize authentication:', error);
+        if (active) {
+          initialized = true;
+          setUser(null);
+          setIsLoading(false);
+        }
+      });
 
     return () => {
       active = false;

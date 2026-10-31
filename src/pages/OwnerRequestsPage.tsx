@@ -14,11 +14,13 @@ import { PageHeader } from '../components/ui/PageHeader';
 import { useAuth } from '../hooks/useAuth';
 import { formatErrorMessage } from '../lib/errors';
 import { bookingService } from '../services/bookingService';
+import { isMockAuthMode } from '../services/authService';
 import { Booking } from '../types/booking';
 import { ConditionGrade } from '../types/conditionReport';
 
 export const OwnerRequestsPage: React.FC = () => {
   const { user, isOwner, switchDemoRole } = useAuth();
+  const allowDemoPersonaSwitch = isMockAuthMode() && !isOwner;
   const [requests, setRequests] = useState<Booking[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -128,7 +130,7 @@ useEffect(() => {
         description="Review incoming reservation requests, perform initial condition audits at checkout, and verify returns."
         breadcrumbs={[{ label: 'Home', href: '/' }, { label: 'Owner Requests' }]}
         actions={
-          !isOwner ? (
+          allowDemoPersonaSwitch ? (
             <Button
               variant="outline"
               size="sm"
@@ -142,7 +144,7 @@ useEffect(() => {
       />
 
       {/* Role Notice Banner for Hackathon Demo */}
-      {!isOwner && (
+      {allowDemoPersonaSwitch && (
         <div className="mb-8 p-4 rounded-2xl bg-blue-50/70 border border-blue-200/80 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs text-blue-900">
           <div className="flex items-center gap-2">
             <ShieldCheck className="w-4 h-4 text-blue-600 shrink-0" />
