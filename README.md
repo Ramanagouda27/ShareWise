@@ -15,7 +15,7 @@ ShareWise is a campus equipment discovery and reservation platform for students,
 - **Owner workflow interface:** A lab-custodian dashboard is included for reviewing requests and handling checkout/return-condition steps.
 - **Database-backed booking rules:** PostgreSQL RPCs centralize booking transitions and server-side validation rather than relying on client-side checks alone.
 
-The currently configured demo catalogue contains six illustrative entries: a Rigol DS1054Z oscilloscope, NVIDIA Jetson Orin Nano kit, Original Prusa MK4 3D printer, Intel RealSense D435i camera, Raspberry Pi 5 starter kit, and Hakko FX-888D soldering station. Replace the demo inventory and locations with institution-verified information before real-world use.
+The hosted catalogue contains illustrative demonstration inventory, including a Rigol DS1054Z oscilloscope, NVIDIA Jetson Orin Nano kit, Original Prusa MK4 3D printer, Intel RealSense D435i camera, Raspberry Pi 5 starter kit, and Hakko FX-888D soldering station. Additional demo/test entries may be present in the live project. These records are not verification of physical campus inventory; confirm equipment, ownership, availability, locations, and safety rules with the institution before real-world use.
 
 ## Technology
 
@@ -71,6 +71,8 @@ Migrations are in `supabase/migrations/`:
 1. `202610280001_profiles.sql` — profile support
 2. `202610280002_sharewise_core_tables.sql` — resources, bookings, and supporting domain tables/policies
 3. `202610280003_booking_rpcs.sql` — booking request, review, cancellation, check-in, and return procedures
+4. `20261030045541_owner_roles.sql` — trusted profile roles and custodian role assignment for the seeded demo resources
+5. `20261030045702_allow_service_role_profile_role_changes.sql` — permits role changes only through the trusted service-role path in the profile trigger
 
 The repo also includes SQL test scripts under `supabase/tests/`.
 
@@ -82,7 +84,7 @@ npx supabase@latest link --project-ref YOUR_PROJECT_REF
 npx supabase@latest db push --linked
 ```
 
-Review migrations and the target project before applying them. The configured hosted demo has these migrations applied. A fresh database will also need appropriate resource inventory and an authorized owner/profile setup; the six demo rows in the hosted project are not inserted by the three migrations.
+Review migrations and the target project before applying them. The configured hosted demo has all five migrations applied; **do not rerun these migrations manually on the hosted project**. A fresh database also needs resource inventory and an authorized owner/profile setup; demo resources are not inserted by these schema migrations.
 
 ### Booking RPCs
 
@@ -117,12 +119,27 @@ Set the required `VITE_*` environment variables in Vercel for each environment t
 
 For Supabase Auth redirects, configure the production and preview URLs in the Supabase Auth URL Configuration. Reliable email delivery may require configuring a custom SMTP provider.
 
-## Important integration notes
+## Live roles, owner access, and evaluator setup
 
-- **Owner permissions:** Live auth currently defaults signed-in users to the student UI role until trusted role/profile mapping is connected. The owner dashboard UI and database RPCs exist, but an authorized owner account and role/profile contract must be configured and verified before treating owner approval, checkout, and return as production-ready. The demo persona switcher is not an authorization mechanism.
-- **Email recovery:** The recovery and reset pages are implemented. Actual recovery-email delivery depends on Supabase Auth URL allow-list settings and the project's email provider/rate limits.
-- **Demo inventory:** The six hosted catalogue entries are illustrative demo data, not verification of physical campus inventory. Confirm equipment, ownership, availability, locations, and safety rules with the institution before real use.
+- **Trusted role mapping is implemented.** In Supabase mode, the app reads `display_name` and `role` from the user's protected `public.profiles` row. User-editable Auth metadata and the requested signup role do not grant owner access; accounts default to `student` unless a trusted administrator provisions an elevated role.
+- **Owner route protection is implemented.** The `/owner/requests` route requires an `owner` role (or `admin`). The production owner workflow has been smoke-tested: student booking request, owner approval and rejection, checkout with an initial condition report, and return with a final condition report. A student-session direct-navigation test redirected away from the owner dashboard.
+- **Role writes are restricted.** The authenticated database role cannot update `public.profiles.role`; the profile trigger only permits role changes through the trusted service-role path. Do not weaken this control or use the public signup form to assign an owner.
+- **Dedicated evaluator account is a pre-evaluation task.** The hosted project currently has a designated custodian account used by the project team. Do not share that person's password or depend on evaluators accessing that mailbox. Before an external judging session, create a separate Auth user with a mailbox controlled by the team, provision its `public.profiles.role` as `owner` through a trusted administrative/service-role process, and create a clearly labelled `TEST ONLY` resource owned by that account. Verify that the evaluator owner can manage only its assigned demo resource and that a separate student account can request it. The evaluator account and resource must be set up in the hosted Supabase project; this repository documentation does not create them.
+- **Evaluator credentials:** Never commit passwords, recovery links, access tokens, Supabase secret keys, or the service-role key. Share evaluator credentials privately only through an approved hackathon channel, and rotate/revoke the demo credentials after judging if appropriate.
+- **Email recovery:** Recovery and reset pages are implemented. Actual email delivery depends on Supabase Auth redirect allow-list settings and the configured email provider/rate limits.
+- **Demo inventory:** Hosted resource records are illustrative test/demo data, not proof of physical campus inventory. Confirm equipment, ownership, availability, locations, and safety rules with the institution before real use.
 - **Security:** Never expose Supabase secret/service-role keys in the browser. Keep booking authorization and state transitions enforced in trusted backend/database code and RLS policies.
+
+## Production verification summary
+
+The live production flow has been smoke-tested with designated test bookings through:
+- student booking creation and reservation history;
+- owner approval and rejection (including rejection reason);
+- checkout/handover with an initial condition report;
+- return verification with a final condition report; and
+- student-role access to `/owner/requests` being redirected away from the owner dashboard.
+
+These are smoke-test results, not a guarantee that every edge case has been tested. Automated GitHub Actions checks are not currently configured/reported for the owner-role pull request; the repo's documented local validation commands are `npm run lint`, `npm run build`, and the 13 booking/error tests.
 
 ## Project structure
 
